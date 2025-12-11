@@ -1,0 +1,233 @@
+tu est un expere en scraping, en utilisant la biblotheque scrapy de python. tu va m'aider pour un projet de scraping sur https://publicationtc.fr.ch/ 
+je veut que tu me genere un spyder qui suis les etapes suivantes :
+
+le premiere etape va etre de faire la recherche en insérant 'e' dans le input (<input type="text" class="suchfeldAlles suchfeldAlles-publ" placeholder="Plein texte" tabindex="1" style="width: 714px;">) puis en cliquant sur l'evenement javascript (<i onmouseover="positionToolTip(event, this)" class="fa fa-search tooltip"><span class="tooltxt" style="top: 115px; left: 772px;">Recherche</span></i>) afin d'effectuer la recherhe
+
+l'etape 2 (la plus important) : une fois que la page a charger apres la recherhe il faut aller dans le deuxieme tbody de la div "<div class="GB2UA-DDDUB" style="width: 975px;">" pour ragerder cette : <table class="GB2UA-DDKIC" cellpadding="0" cellspacing="0" style="table-layout: fixed; width: 972px;">
+
+ensuite on va parcourir chaque tr de la table. dans le td cellindex="0" on peu y trouver la date de publication et la date d'arret (dans cette ordre).
+ensuite dans le td cellindex="8" on va y trouver l'evenement javascript (<i onmouseover="positionToolTipUpLeft(event, this)" class="fa fa-download tooltip-up-left"><span class="tooltxt" style="top: 600px; left: 797px;">Voir le document en format original</span></i>) qui permet a l'utilisateur d'ouvrire le pdf dans une autre pages ce qui va generer un requete dont on pourrai extraire le loadtable afin de trouver le pdf.
+l'etape 2 se fin quand on arrive a la fin des tr de la table (normalement il y en a 20).
+
+l'etape 3 : il faudrai cliquer sur cette evenement js : <i onmouseover="positionToolTip(event, this)" class="fa fa-angle-right tooltip"><span class="tooltxt" style="top: 508px; left: 101px;">Page suivante</span></i>
+pour pouvoir acceder a la page suivante et repeter l'etape 2
+
+ ---------------------------------------------------------------
+ maintenant qu'on a une bonne base je t'ai passer en mode plan pour te donner pleins d'information et etablir un plan pour la suite.
+ 
+	premier point : 
+voici ce que mon employeur ma demander :
+"J’ai un gros projet d’extraction de décisions de jurisprudence en cours, et, à ce jour, il ne me manque plus que les sources publiées avec l’application Tribuna à traiter.
+ 
+Je couvre donc déjà 20 cantons à 100%.
+ 
+La priorité est d’extraire ce que, par exemple, le canton de Fribourg publie, https://publicationtc.fr.ch/ mais également les 5 autres cantons qui utilisent Tribuna pour publier les décisions. Le plus important, dans un premier temps, est de récupérer l’année de publication de la décision et le chemin vers le PDF de la décision pour dowload ultérieur. Mon scrapy gère le stockage et avec ces deux informations, j’ai le strict minimum. Si on arrive à récupérer la cour, pour stockage structuré, ce serait encore mieux, mais ce n’est en rien critique : je peux me contenter de séparer les décisions par année de publication (plus de 10000 fichiers en flat dans un dossier, ce n'est pas une bonne idée).
+ 
+Il faut également permettre 2 exécutions différenciées :
+* Le premier run qui alimentera le stockage, avec toutes les décisions
+* Les run de mise à jour, qui tourneront toutes les semaines, qui doivent récupérer les N jours précédents (y compris la date du jour)
+ 
+Les grisons par exemple, publient 14043 décisions, Fribourg publie 13563 décisions.
+ 
+Aujourd’hui je ne traite pas explicitement les metadata des décisions, mais il est possible que je décide de les rajouter à terme dans mon stockage Sharepoint.
+ 
+J’utilise scrapy 2.13.3, en async, et je peux vous fournir mon items.py pour que vous puissiez suivre mon modèle actuel, mes pipelines gèrent la suite avec une pipeline différente pour le HTML et une autre pour les PDF. J’utilise évidemment, quand c’est possible, le middleware standard de scrapy pour le download des fichiers (détection des doublons, des fichiers mis à jour etc). Mes pipelines remontent également les quelques metadata que je documente (mais ça se limite au champs Titre, que je ne pousse que présent) ; certains de mes spiders tournent en async mais avec playwright limité à un onglet, pour limiter la visibilité du spider sur les protections des différents sites. A ce jour, en utilisant un download delay entre 0.75 et 1 seconde, je n’ai jamais été bloqué par un site. Mon environnement de développement est en Windows, le serveur de prod pour les mises à jour est hébergé sur Azure, en Ubuntu 24.
+ 
+Si il semble indispensable de modifier les middlewares, ou faire des changements sur scrapy, je peux vous fournir un venv dédié à votre spider, et je m’occupe de la planification des executions sur mon environnement.
+ 
+Je préfèrerais un modèle de spider basé sur le spider standard de scrapy, que je peux par la suite instancier pour les 9 ou 10 sources de données qui publient avec Tribuna. Maintenant, si vous me livrez un spider que je dois adapter avec quelques constantes, je peux également le faire. Les deux sont des delivirables acceptables. Il faut noter que nous avons des sources en francais, en allemand, en italien, voir bilingue ou même trilingues (grisons/fribourg sont au moins bilingues)  
+ 
+J’ai contacté l’éditeur de Tribuna aujourd’hui pour déterminer s’ils étaient disposés à partager les classes client Java utilisées dans le framework GwT de l’application. J’ai commencé sur mon 4e prototype ce matin et la structure GwT de ce que le serveur envoie au navigateur est abominable et, mal, voir pas structurée de façon logique.
+ 
+J’ai déjà un premier modèle playwright qui ne fonctionne QUE en intéractif, mais c’est pas utilisable sur un serveur sans Xwindows. J’ai un 2e prototype qui se casse les dents sur le modèle de données GwT, avec des dates manquantes etc qui tourne depuis ce matin, mais les résultats sont moins que concluants.
+ 
+Je vous laisse m’appeler à votre convenance, sauf demain matin."
+
+je voudrais donc que tu me liste les contraintes et les points importants a verifier pour respecter les demandes du client.
+
+	deuxieme point (partie technique) :
+le site https://publicationtc.fr.ch/ est une application GWT donc elle utilise beaucoup de javascript
+ 
+apres avoir regarder la demande et la structure du site je pense que la bonne marche a suivre est la suivante :
+
+le premiere etape va etre de faire la recherche en insérant 'e' dans le input (<input type="text" class="suchfeldAlles suchfeldAlles-publ" placeholder="Plein texte" tabindex="1" style="width: 714px;">) puis en cliquant sur l'evenement javascript (<i onmouseover="positionToolTip(event, this)" class="fa fa-search tooltip"><span class="tooltxt" style="top: 115px; left: 772px;">Recherche</span></i>) afin d'effectuer la recherhe
+
+l'etape 2 (la plus important) : une fois que la page a charger apres la recherhe il faut aller dans le deuxieme tbody de la div "<div class="GB2UA-DDDUB" style="width: 975px;">" pour ragerder cette : <table class="GB2UA-DDKIC" cellpadding="0" cellspacing="0" style="table-layout: fixed; width: 972px;">
+
+ensuite on va parcourir chaque tr de la table. dans le td cellindex="0" on peu y trouver la date de publication et la date d'arret (dans cette ordre).
+ensuite dans le td cellindex="8" on va y trouver l'evenement javascript qui permet a l'utilisateur d'ouvrire le pdf dans une autre pages ce qui va generer un requete dont on pourrai extraire le loadtable afin de touver le pdf.
+l'etape 2 se finnie quand on arrive a la fin des tr de la table (normalement il y en a 20).
+
+l'etape 3 : il faudrai cliquer sur cette evenement js : <i onmouseover="positionToolTip(event, this)" class="fa fa-angle-right tooltip"><span class="tooltxt" style="top: 508px; left: 101px;">Page suivante</span></i>
+pour pouvoir acceder a la page suivante et repeter l'etape 2
+
+	conclusion : 
+dit moi ce que tu pense de mon raisonement (bon et mover coter. amelioration et critique)
+
+je veut que tu analayse les demande du client et mon raisonement afin que tu me fournice un plan de realisation complet. avant de me donner ton plan dit moi si tu a besoin d'information supplementaire : la structure du site en html, la structure des requete que renvoie le site...
+
+
+
+-----------------------------------------------------------------------
+
+le fichier structure_tribuna.html est un copier coller de la balise <html> de la page d'acceuil
+le fichier apresRechercheStructure.html est un copier coller du site aprea avoir effectuer une recherche
+
+request playload : 
+	- en effectuant un recherche : 7|0|56|https://publicationtc.fr.ch/tribunavtplus/|CAC80118FB77794F1FDFC1B51371CC63|tribunavtplus.client.zugriff.LoadTableService|search|java.lang.String/2004016611|java.util.ArrayList/4159755760|Z|I|java.lang.Integer/3438268394|java.util.Map|e|0|TC||0;false|5;true|4f8108014967aed158a7443a59b34b290b845678700185367b31fac016e506c0|1|java.util.HashMap/1797211028|decisionDate|Date de l'arrêt|dossierNumber|Dossier|classification|Classification|indexCode|Source|dossierObject|Objet|law|Matière|shortText|Texte d'aperçu|department|Département|createDate|Date de création|creater|Créateur|judge|Juge|executiontype|Manière de liquidation|legalDate|Date exécutoire|objecttype|Type d'objet|typist|Auteur|description|Description|reference|Référence|relevance|Pertinence|fr|1|2|3|4|46|5|5|6|7|6|5|5|5|5|5|5|5|5|5|5|5|5|5|5|5|5|5|5|5|5|8|8|8|5|5|9|9|9|5|5|5|5|7|10|5|5|5|5|5|5|5|11|12|6|0|0|6|1|5|13|14|14|14|14|14|14|14|14|14|14|14|14|14|14|14|14|14|14|14|14|20|0|-1|14|14|0|9|0|9|-1|15|16|17|18|0|19|18|5|20|5|21|5|22|5|23|5|24|5|25|5|26|5|27|5|28|5|29|5|30|5|31|5|32|5|33|5|34|5|35|5|36|5|37|5|38|5|39|5|40|5|41|5|42|5|43|5|44|5|45|5|46|5|47|5|48|5|49|5|50|5|51|5|52|5|53|5|54|5|55|14|56|14|14|12|12|0|
+	- en ouvrant un pdf : 7|0|11|https://publicationtc.fr.ch/tribunavtplus/|CAC80118FB77794F1FDFC1B51371CC63|tribunavtplus.client.zugriff.LoadTableService|urlEncodingTribuna|java.util.Map|java.util.HashMap/1797211028|java.lang.String/2004016611|partURL|601_2020_177_f18a529ee8848b75abde07209eae3fd7a9c7a11cf75c501d10a9f97e42c6b6416012797187ad06ed8d6a9b1c3b4809e6b02aa7b2002a6ebfca7866e07aec3d5f64d3110b4a3ce1b852e271b37a6b7c3a|dossiernummer|601_2020_177|1|2|3|4|1|5|6|2|7|8|7|9|7|10|7|11|
+	- en changeant de page : 7|0|56|https://publicationtc.fr.ch/tribunavtplus/|CAC80118FB77794F1FDFC1B51371CC63|tribunavtplus.client.zugriff.LoadTableService|search|java.lang.String/2004016611|java.util.ArrayList/4159755760|Z|I|java.lang.Integer/3438268394|java.util.Map|e|0|TC||0;false|5;true|4f8108014967aed158a7443a59b34b290b845678700185367b31fac016e506c0|1|java.util.HashMap/1797211028|decisionDate|Date de l'arrêt|dossierNumber|Dossier|classification|Classification|indexCode|Source|dossierObject|Objet|law|Matière|shortText|Texte d'aperçu|department|Département|createDate|Date de création|creater|Créateur|judge|Juge|executiontype|Manière de liquidation|legalDate|Date exécutoire|objecttype|Type d'objet|typist|Auteur|description|Description|reference|Référence|relevance|Pertinence|fr|1|2|3|4|46|5|5|6|7|6|5|5|5|5|5|5|5|5|5|5|5|5|5|5|5|5|5|5|5|5|8|8|8|5|5|9|9|9|5|5|5|5|7|10|5|5|5|5|5|5|5|11|12|6|0|0|6|1|5|13|14|14|14|14|14|14|14|14|14|14|14|14|14|14|14|14|14|14|14|14|20|1|-1|14|14|9|11407|9|0|9|-1|15|16|17|18|0|19|18|5|20|5|21|5|22|5|23|5|24|5|25|5|26|5|27|5|28|5|29|5|30|5|31|5|32|5|33|5|34|5|35|5|36|5|37|5|38|5|39|5|40|5|41|5|42|5|43|5|44|5|45|5|46|5|47|5|48|5|49|5|50|5|51|5|52|5|53|5|54|5|55|14|56|14|14|12|12|0|
+
+
+
+request Headers :
+	-lors de la recherhe : 	Request URL
+						https://publicationtc.fr.ch/tribunavtplus/loadTable
+						Request Method
+						POST
+						Status Code
+						200 OK
+						Remote Address
+						156.25.4.24:443
+						Referrer Policy
+						strict-origin-when-cross-origin
+						HTTP/1.1 200
+						Strict-Transport-Security: max-age=31536000;includeSubDomains
+						X-Frame-Options: DENY
+						X-Content-Type-Options: nosniff
+						Content-Encoding: gzip
+						Content-Disposition: attachment
+						Content-Type: application/json;charset=utf-8
+						Content-Length: 7102
+						Date: Wed, 03 Dec 2025 10:28:10 GMT
+						Keep-Alive: timeout=60
+						Connection: keep-alive
+						Server: Unknown
+						POST /tribunavtplus/loadTable HTTP/1.1
+						Accept: */*
+						Accept-Encoding: gzip, deflate, br, zstd
+						Accept-Language: fr,fr-FR;q=0.9,en;q=0.8,de;q=0.7,th;q=0.6,es;q=0.5,el;q=0.4
+						Connection: keep-alive
+						Content-Length: 1204
+						Content-Type: text/x-gwt-rpc; charset=UTF-8
+						Host: publicationtc.fr.ch
+						Origin: https://publicationtc.fr.ch
+						Referer: https://publicationtc.fr.ch/
+						Sec-Fetch-Dest: empty
+						Sec-Fetch-Mode: cors
+						Sec-Fetch-Site: same-origin
+						User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 OPR/124.0.0.0
+						X-GWT-Module-Base: https://publicationtc.fr.ch/tribunavtplus/
+						X-GWT-Permutation: B24169D4B341B45C35562EEB9D44E644
+						sec-ch-ua: "Chromium";v="140", "Not=A?Brand";v="24", "Opera GX";v="124"
+						sec-ch-ua-mobile: ?0
+						sec-ch-ua-platform: "Windows"
+
+	-en ouvrant un pdf : Request URL
+					https://publicationtc.fr.ch/tribunavtplus/loadTable
+					Request Method
+					POST
+					Status Code
+					200 OK
+					Remote Address
+					156.25.4.24:443
+					Referrer Policy
+					strict-origin-when-cross-origin
+					HTTP/1.1 200
+					Strict-Transport-Security: max-age=31536000;includeSubDomains
+					X-Frame-Options: DENY
+					X-Content-Type-Options: nosniff
+					Content-Encoding: gzip
+					Content-Disposition: attachment
+					Content-Type: application/json;charset=utf-8
+					Content-Length: 240
+					Date: Wed, 03 Dec 2025 10:30:16 GMT
+					Keep-Alive: timeout=60
+					Connection: keep-alive
+					Server: Unknown
+					POST /tribunavtplus/loadTable HTTP/1.1
+					Accept: */*
+					Accept-Encoding: gzip, deflate, br, zstd
+					Accept-Language: fr,fr-FR;q=0.9,en;q=0.8,de;q=0.7,th;q=0.6,es;q=0.5,el;q=0.4
+					Connection: keep-alive
+					Content-Length: 462
+					Content-Type: text/x-gwt-rpc; charset=UTF-8
+					Host: publicationtc.fr.ch
+					Origin: https://publicationtc.fr.ch
+					Referer: https://publicationtc.fr.ch/
+					Sec-Fetch-Dest: empty
+					Sec-Fetch-Mode: cors
+					Sec-Fetch-Site: same-origin
+					User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 OPR/124.0.0.0
+					X-GWT-Module-Base: https://publicationtc.fr.ch/tribunavtplus/
+					X-GWT-Permutation: B24169D4B341B45C35562EEB9D44E644
+					sec-ch-ua: "Chromium";v="140", "Not=A?Brand";v="24", "Opera GX";v="124"
+					sec-ch-ua-mobile: ?0
+					sec-ch-ua-platform: "Windows"
+
+
+---------------------------------------------------------------------------
+
+Plan : Spider Tribuna multi-cantons pour extraction décisions
+Spider Scrapy avec Playwright pour extraire 13,000+ décisions de jurisprudence depuis 6 cantons utilisant Tribuna, avec support first-run complet et mises à jour incrémentales hebdomadaires. Architecture testable à chaque étape.
+
+Étapes
+Initialiser projet Scrapy avec tests de connexion basiques
+
+Créer structure Scrapy : scrapy startproject tribuna_scraper . générant scrapy.cfg, settings.py, dossiers spiders/, items.py
+Installer dépendances : pip install scrapy scrapy-playwright pytest dans venv
+Configurer settings.py : activer PLAYWRIGHT, définir DOWNLOAD_DELAY = 1, USER_AGENT, désactiver ROBOTSTXT_OBEY
+TEST 1 : Spider minimal test_connection.py qui charge https://publicationtc.fr.ch/ avec Playwright et vérifie présence titre → scrapy crawl test_connection
+Définir modèle de données et parser la page de recherche
+
+Créer items.py avec TribunaDecisionItem : champs publication_date, decision_date, pdf_url, pdf_id, dossier_number, court, canton
+Spider tribuna_base.py : méthode start_requests() ouvrant page avec Playwright, parse_search_form() injectant "e" dans .suchfeldAlles input, cliquant .fa-search
+Méthode parse_results_page() : localiser .GB2UA-DDDUB → 2e tbody → table .GB2UA-DDKIC, compter nombre de <tr> trouvés
+TEST 2 : Exécuter spider, logger nombre de résultats trouvés page 1 → scrapy crawl tribuna_base -a canton=FR -L INFO | grep "Found"
+Extraire données de chaque ligne de résultat
+
+Dans parse_results_page() : itérer sur chaque <tr> de la table
+Sous-parser extract_row_data(row) : extraire td[cellindex="0"] (dates avec regex \d{2}\.\d{2}\.\d{4}), td[cellindex="8"] (attribut onclick ou data-*)
+Créer items Scrapy avec dates parsées, pdf_id = None temporairement
+TEST 3 : Afficher 5 premiers items en JSON → scrapy crawl tribuna_base -a canton=FR -o test_output.json -s CLOSESPIDER_ITEMCOUNT=5
+Intercepter requêtes GWT pour capturer URLs PDF
+
+Créer middleware playwright_interceptor.py : hook page.on("response") filtrant /loadTable + méthode POST
+Parser réponses JSON GWT : extraire champs partURL et dossiernummer depuis payload, stocker mapping dossier → partURL en cache spider
+Modifier extract_row_data() : utiliser cache pour construire pdf_url = f"https://publicationtc.fr.ch/tribunavtplus/pdf/{partURL}.pdf" (URL à confirmer)
+TEST 4 : Vérifier 3 PDF URLs construites sont accessibles → scrapy crawl tribuna_base -s CLOSESPIDER_ITEMCOUNT=3 puis curl manuel sur URLs loggées
+Implémenter pagination automatique
+
+Méthode check_next_page() : chercher bouton .fa-angle-right parent, vérifier si disabled ou classe inactive
+Si bouton actif : cliquer avec Playwright page.click(), attendre chargement .GB2UA-DDKIC, rappeler parse_results_page() récursivement
+Logger numéro page courante et total items extraits
+TEST 5 : Limiter à 3 pages → scrapy crawl tribuna_base -s CLOSESPIDER_PAGECOUNT=3 -L DEBUG vérifier logs pagination
+Ajouter filtre dates pour mode mise à jour
+
+Argument spider --days : calculer min_date = today - timedelta(days=N)
+Dans parse_results_page() : si publication_date < min_date, logger skip + stopper pagination (return sans next page)
+Mode first-run : --days=0 ou absence argument = tout extraire
+TEST 6 : scrapy crawl tribuna_base --days=7 vérifier seules décisions <7j extraites, pagination s'arrête correctement
+Rendre spider multi-cantons paramétrable
+
+Créer canton_configs.py : dict TRIBUNA_CANTONS avec FR, GR (URL, langue, nom)
+Modifier tribuna_base.py : argument -a canton=XX, charger config depuis dict, adapter start_urls et custom_settings
+TEST 7 : Tester 2 cantons → scrapy crawl tribuna_base -a canton=FR -s CLOSESPIDER_ITEMCOUNT=2 puis -a canton=GR
+Intégrer pipelines download PDF et gestion doublons
+
+Activer FilesPipeline Scrapy : settings FILES_STORE, FILES_URLS_FIELD = 'pdf_url'
+Pipeline custom pdf_dedup_pipeline.py : vérifier hash PDF existant, skip si identique
+Ajouter métadonnées fichier : nommer {canton}_{dossier_number}_{date}.pdf
+TEST 8 : Télécharger 10 PDFs → scrapy crawl tribuna_base -s CLOSESPIDER_ITEMCOUNT=10 vérifier fichiers dans FILES_STORE/
+Robustesse : gestion erreurs et retry Playwright
+
+Middleware erreurs : catch TimeoutError, PlaywrightError, retry max 3x avec backoff exponentiel
+Logger pages problématiques dans failed_pages.json pour review manuel
+Ajouter signal spider_closed : statistiques finales (total items, pages, erreurs)
+TEST 9 : Simuler erreur réseau (déconnecter WiFi mid-crawl), vérifier retry fonctionne
+Documentation et déploiement
+
+README.md : installation venv, commandes run (first vs update), variables env, structure projet
+Script run_update.sh : wrapper scrapy crawl tribuna_base --days=7 avec logging
+Config Azure : Dockerfile, cron hebdomadaire, secrets SharePoint
+TEST 10 : Run complet Fribourg first-run → scrapy crawl tribuna_base -a canton=FR monitoring durée totale (~2-3h attendu)

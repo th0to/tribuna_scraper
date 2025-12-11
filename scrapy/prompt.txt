@@ -1,0 +1,31 @@
+je doit faire un projet de scraping avec python, les consigne de ce projet sont contenu dans le screenshot que je te join et dans la reponse au mail ci-dessous :
+je viens d'avoir des information complementaire pour le projet : Bonjour Arthur,
+ 
+J’ai un gros projet d’extraction de décisions de jurisprudence en cours, et, à ce jour, il ne me manque plus que les sources publiées avec l’application Tribuna à traiter.
+ 
+Je couvre donc déjà 20 cantons à 100%.
+ 
+La priorité est d’extraire ce que, par exemple, le canton de Fribourg publie, https://publicationtc.fr.ch/ mais également les 5 autres cantons qui utilisent Tribuna pour publier les décisions. Le plus important, dans un premier temps, est de récupérer l’année de publication de la décision et le chemin vers le PDF de la décision pour dowload ultérieur. Mon scrapy gère le stockage et avec ces deux informations, j’ai le strict minimum. Si on arrive à récupérer la cour, pour stockage structuré, ce serait encore mieux, mais ce n’est en rien critique : je peux me contenter de séparer les décisions par année de publication (plus de 10000 fichiers en flat dans un dossier, ce n'est pas une bonne idée).
+ 
+Il faut également permettre 2 exécutions différenciées :
+* Le premier run qui alimentera le stockage, avec toutes les décisions
+* Les run de mise à jour, qui tourneront toutes les semaines, qui doivent récupérer les N jours précédents (y compris la date du jour)
+ 
+Les grisons par exemple, publient 14043 décisions, Fribourg publie 13563 décisions.
+ 
+Aujourd’hui je ne traite pas explicitement les metadata des décisions, mais il est possible que je décide de les rajouter à terme dans mon stockage Sharepoint.
+ 
+J’utilise scrapy 2.13.3, en async, et je peux vous fournir mon items.py pour que vous puissiez suivre mon modèle actuel, mes pipelines gèrent la suite avec une pipeline différente pour le HTML et une autre pour les PDF. J’utilise évidemment, quand c’est possible, le middleware standard de scrapy pour le download des fichiers (détection des doublons, des fichiers mis à jour etc). Mes pipelines remontent également les quelques metadata que je documente (mais ça se limite au champs Titre, que je ne pousse que présent) ; certains de mes spiders tournent en async mais avec playwright limité à un onglet, pour limiter la visibilité du spider sur les protections des différents sites. A ce jour, en utilisant un download delay entre 0.75 et 1 seconde, je n’ai jamais été bloqué par un site. Mon environnement de développement est en Windows, le serveur de prod pour les mises à jour est hébergé sur Azure, en Ubuntu 24.
+ 
+Si il semble indispensable de modifier les middlewares, ou faire des changements sur scrapy, je peux vous fournir un venv dédié à votre spider, et je m’occupe de la planification des executions sur mon environnement.
+ 
+Je préfèrerais un modèle de spider basé sur le spider standard de scrapy, que je peux par la suite instancier pour les 9 ou 10 sources de données qui publient avec Tribuna. Maintenant, si vous me livrez un spider que je dois adapter avec quelques constantes, je peux également le faire. Les deux sont des delivirables acceptables. Il faut noter que nous avons des sources en francais, en allemand, en italien, voir bilingue ou même trilingues (grisons/fribourg sont au moins bilingues)  
+ 
+J’ai contacté l’éditeur de Tribuna aujourd’hui pour déterminer s’ils étaient disposés à partager les classes client Java utilisées dans le framework GwT de l’application. J’ai commencé sur mon 4e prototype ce matin et la structure GwT de ce que le serveur envoie au navigateur est abominable et, mal, voir pas structurée de façon logique.
+ 
+J’ai déjà un premier modèle playwright qui ne fonctionne QUE en intéractif, mais c’est pas utilisable sur un serveur sans Xwindows. J’ai un 2e prototype qui se casse les dents sur le modèle de données GwT, avec des dates manquantes etc qui tourne depuis ce matin, mais les résultats sont moins que concluants.
+ 
+Je vous laisse m’appeler à votre convenance, sauf demain matin.
+
+j'ai donner tout ca a claude, il a fait du bon travailler (je te join tout ce qu'il ma donner) mais j'ai l'impression qu'il s'est un peu melanger (il ya des ddoublons et des choses qui manque).
+je te demande donc de regarder tout ca et fait moi un conte rendu bref mais explicite avant de commencer a travailler.

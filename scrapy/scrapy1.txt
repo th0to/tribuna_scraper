@@ -1,0 +1,618 @@
+# pyproject.toml
+[tool.poetry]
+name = "tribuna-scraper"
+version = "0.1.0"
+description = "Scraper pour les portails Tribuna des cantons suisses"
+authors = ["François Uldry <fuldry@ausarl.ch>"]
+license = "MIT"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+scrapy = "^2.11"
+python-dateutil = "^2.8.2"
+validators = "^0.22.0"
+pytz = "^2024.1"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.3"
+pytest-cov = "^4.1.0"
+black = "^23.12.0"
+pylint = "^3.0.3"
+mypy = "^1.7.1"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+# ========================================
+# scrapy.cfg
+[settings]
+default = tribuna_scraper.settings
+
+[deploy]
+project = tribuna_scraper
+
+# ========================================
+# tribuna_scraper/items.py
+import scrapy
+from scrapy import Field
+
+class TribunaDecisionItem(scrapy.Item):
+    """Item représentant une décision de justice sur Tribuna"""
+    
+    # Métadonnées source
+    source = Field()  # domaine du site (ex: publicationtc.fr.ch)
+    locale = Field()  # langue (fr, de, it)
+    
+    # Dates
+    publication_date = Field()  # ISO format YYYY-MM-DD
+    decision_date = Field()     # ISO format YYYY-MM-DD
+    
+    # Identifiants
+    docket_number = Field()  # numéro de dossier
+    court = Field()          # juridiction
+    title = Field()          # titre de la décision
+    
+    # URLs
+    detail_url = Field()     # URL de la page détail
+    pdf_url = Field()        # URL du PDF (ServletDownload)
+    pdf_id = Field()         # identifiant unique du PDF
+    pdf_params = Field()     # paramètres du ServletDownload (dict)
+    
+    # Fichier
+    pdf_sha256 = Field()     # hash SHA256 du PDF
+    pdf_path = Field()       # chemin local du PDF téléchargé
+    
+    # Métadonnées système
+    scraped_at = Field()     # timestamp ISO de la collecte
+    
+    # Champs optionnels
+    summary = Field()        # résumé si disponible
+    keywords = Field()       # mots-clés (list)
+    language = Field()       # langue du document
+    
+# ========================================
+# tribuna_scraper/utils/normalizers.py
+from datetime import datetime
+import re
+from typing import Optional, Dict, Any
+from urllib.parse import urlparse, parse_qs
+
+class TribunaNormalizer:
+    """Normalisation des données Tribuna"""
+    
+    @staticmethod
+    def normalize_date(date_str: str, formats: list = None) -> Optional[str]:
+        """
+        Normalise une date en ISO format YYYY-MM-DD
+        Gère les formats suisses courants: DD.MM.YYYY, DD/MM/YYYY, etc.
+        """
+        if not date_str:
+            return None
+            
+        # Nettoyer la chaîne
+        date_str = date_str.strip()
+        
+        # Formats courants en Suisse
+        if formats is None:
+            formats = [
+                '%d.%m.%Y',    # 31.12.2024
+                '%d/%m/%Y',    # 31/12/2024
+                '%d-%m-%Y',    # 31-12-2024
+                '%Y-%m-%d',    # 2024-12-31 (ISO)
+                '%d %B %Y',    # 31 décembre 2024
+                '%d. %B %Y',   # 31. Dezember 2024
+            ]
+        
+        for fmt in formats:
+            try:
+                dt = datetime.strptime(date_str, fmt)
+                return dt.strftime('%Y-%m-%d')
+            except ValueError:
+                continue
+        
+        # Essai avec regex pour formats flexibles
+        patterns = [
+            (r'(\d{1,2})\.(\d{1,2})\.(\d{4})', r'\3-\2-\1'),
+            (r'(\d{1,2})/(\d{1,2})/(\d{4})', r'\3-\2-\1'),
+        ]
+        
+        for pattern, replacement in patterns:
+            match = re.match(pattern, date_str)
+            if match:
+                try:
+                    date_iso = re.sub(pattern, replacement, date_str)
+                    # Valider et formater proprement
+                    dt = datetime.strptime(date_iso, '%Y-%m-%d')
+                    return dt.strftime('%Y-%m-%d')
+                except ValueError:
+                    continue
+        
+        return None
+    
+    @staticmethod
+    def extract_docket_number(text: str) -> Optional[str]:
+        """
+        Extrait un numéro de dossier
+        Patterns courants: 101_2025_26, 2C_123/2024, etc.
+        """
+        if not text:
+            return None
+            
+        # Patterns de numéros de dossier suisses
+        patterns = [
+            r'\d+_\d{4}_\d+',           # 101_2025_26
+            r'\d+[A-Z]?_\d+/\d{4}',     # 2C_123/2024
+            r'[A-Z]+\s*\d+/\d{4}',      # CO 123/2024
+            r'\d{4}\s*/\s*\d+',         # 2024/123
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                return match.group(0).strip()
+        
+        return text.strip() if text else None
+    
+    @staticmethod
+    def parse_servlet_url(url: str) -> Dict[str, Any]:
+        """
+        Parse une URL ServletDownload pour extraire les paramètres
+        """
+        if not url:
+            return {}
+            
+        parsed = urlparse(url)
+        params = parse_qs(parsed.query)
+        
+        # Extraire l'ID du PDF depuis le path
+        pdf_id = None
+        if '/ServletDownload/' in url:
+            parts = url.split('/ServletDownload/')
+            if len(parts) > 1:
+                pdf_part = parts[1].split('?')[0]
+                pdf_id = pdf_part.replace('.pdf', '')
+        
+        result = {
+            'pdf_id': pdf_id,
+            'dossiernummer': params.get('dossiernummer', [None])[0],
+            'path': params.get('path', [None])[0],
+            'pathIsEncrypted': params.get('pathIsEncrypted', ['0'])[0] == '1',
+        }
+        
+        return {k: v for k, v in result.items() if v is not None}
+    
+    @staticmethod
+    def guess_locale(url: str, text: str = None) -> str:
+        """
+        Devine la locale depuis l'URL ou le contenu
+        """
+        # Depuis l'URL
+        if 'locale=de' in url or '.de.' in url:
+            return 'de'
+        elif 'locale=it' in url or '.it.' in url:
+            return 'it'
+        elif 'locale=fr' in url or '.fr.' in url:
+            return 'fr'
+        
+        # Depuis le texte (mots indicateurs)
+        if text:
+            text_lower = text.lower()
+            if any(word in text_lower for word in ['tribunal', 'arrêt', 'jugement', 'cour']):
+                return 'fr'
+            elif any(word in text_lower for word in ['gericht', 'urteil', 'entscheid']):
+                return 'de'
+            elif any(word in text_lower for word in ['tribunale', 'sentenza', 'corte']):
+                return 'it'
+        
+        return 'fr'  # défaut
+
+# ========================================
+# tribuna_scraper/spiders/base_tribuna.py
+import scrapy
+from scrapy import Request, Spider
+from scrapy.http import Response
+from typing import Iterator, Optional, Dict, Any
+from datetime import datetime
+import pytz
+from urllib.parse import urljoin
+
+from ..items import TribunaDecisionItem
+from ..utils.normalizers import TribunaNormalizer
+
+class BaseTribunaSpider(Spider):
+    """
+    Spider de base pour tous les portails Tribuna
+    Fournit les méthodes communes et heuristiques de parsing
+    """
+    
+    name = 'base_tribuna'
+    allowed_domains = []
+    start_urls = []
+    
+    # Configuration par défaut
+    custom_settings = {
+        'DOWNLOAD_DELAY': 1,  # Respectueux
+        'CONCURRENT_REQUESTS': 2,
+        'AUTOTHROTTLE_ENABLED': True,
+        'AUTOTHROTTLE_TARGET_CONCURRENCY': 2.0,
+        'USER_AGENT': 'TribunaScraper/1.0 (+https://github.com/entscheidsuche)',
+    }
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.normalizer = TribunaNormalizer()
+        self.timezone = pytz.timezone('Europe/Zurich')
+    
+    def parse(self, response: Response) -> Iterator[Any]:
+        """
+        Point d'entrée : analyse la page de liste/recherche
+        """
+        # Chercher un export direct (CSV/XLS)
+        export_links = self.find_export_links(response)
+        if export_links:
+            for url in export_links:
+                yield Request(url, callback=self.parse_export)
+        
+        # Parser les décisions sur la page
+        for item in self.parse_decisions_list(response):
+            yield item
+        
+        # Pagination
+        next_page = self.get_next_page(response)
+        if next_page:
+            yield Request(next_page, callback=self.parse)
+    
+    def parse_decisions_list(self, response: Response) -> Iterator[TribunaDecisionItem]:
+        """
+        Parse la liste des décisions avec heuristiques multiples
+        """
+        # Heuristique 1: Tables HTML
+        for row in response.css('table tr'):
+            if self.is_decision_row(row):
+                item = self.extract_from_table_row(row, response)
+                if item:
+                    yield item
+        
+        # Heuristique 2: Divs/Cards
+        for card in response.css('div.decision-card, div.result-item, div.search-result'):
+            item = self.extract_from_card(card, response)
+            if item:
+                yield item
+        
+        # Heuristique 3: Liens ServletDownload directs
+        for link in response.css('a[href*="ServletDownload"]'):
+            item = self.extract_from_servlet_link(link, response)
+            if item:
+                yield item
+    
+    def is_decision_row(self, row) -> bool:
+        """Vérifie si une ligne de table contient une décision"""
+        # Éviter les headers
+        if row.css('th'):
+            return False
+        
+        # Doit contenir un lien ou du texte substantiel
+        return bool(row.css('a') or len(row.css('td::text').get('', '')) > 10)
+    
+    def extract_from_table_row(self, row, response) -> Optional[TribunaDecisionItem]:
+        """Extrait une décision depuis une ligne de table"""
+        cells = row.css('td')
+        if len(cells) < 2:
+            return None
+        
+        item = TribunaDecisionItem()
+        
+        # Extraction adaptative selon le nombre de colonnes
+        if len(cells) >= 4:
+            # Format typique: Date | Numéro | Juridiction | Titre/Lien
+            item['decision_date'] = self.normalizer.normalize_date(
+                cells[0].css('::text').get('', '').strip()
+            )
+            item['docket_number'] = self.normalizer.extract_docket_number(
+                cells[1].css('::text').get('', '').strip()
+            )
+            item['court'] = cells[2].css('::text').get('', '').strip()
+            
+            # Chercher le lien PDF
+            pdf_link = cells[3].css('a[href*="ServletDownload"]::attr(href)').get()
+            if not pdf_link:
+                pdf_link = row.css('a[href*="ServletDownload"]::attr(href)').get()
+            
+            if pdf_link:
+                item['pdf_url'] = urljoin(response.url, pdf_link)
+                item['title'] = cells[3].css('a::text').get('', '').strip()
+        
+        # Enrichir avec les métadonnées communes
+        return self.enrich_item(item, response)
+    
+    def extract_from_card(self, card, response) -> Optional[TribunaDecisionItem]:
+        """Extrait une décision depuis une carte/div"""
+        item = TribunaDecisionItem()
+        
+        # Patterns flexibles pour différents layouts
+        item['title'] = (
+            card.css('h3::text').get() or
+            card.css('.title::text').get() or
+            card.css('a::text').get('', '')
+        ).strip()
+        
+        # Date
+        date_text = card.css('.date::text, .publication-date::text').get('')
+        item['decision_date'] = self.normalizer.normalize_date(date_text)
+        
+        # Numéro de dossier
+        docket_text = card.css('.docket::text, .reference::text').get('')
+        item['docket_number'] = self.normalizer.extract_docket_number(docket_text)
+        
+        # Lien PDF
+        pdf_link = card.css('a[href*="ServletDownload"]::attr(href)').get()
+        if pdf_link:
+            item['pdf_url'] = urljoin(response.url, pdf_link)
+        
+        return self.enrich_item(item, response)
+    
+    def extract_from_servlet_link(self, link, response) -> Optional[TribunaDecisionItem]:
+        """Extrait depuis un lien ServletDownload direct"""
+        item = TribunaDecisionItem()
+        
+        href = link.css('::attr(href)').get()
+        if not href:
+            return None
+        
+        item['pdf_url'] = urljoin(response.url, href)
+        item['title'] = link.css('::text').get('', '').strip()
+        
+        # Extraire les paramètres de l'URL
+        params = self.normalizer.parse_servlet_url(item['pdf_url'])
+        item['pdf_params'] = params
+        item['pdf_id'] = params.get('pdf_id')
+        item['docket_number'] = params.get('dossiernummer')
+        
+        return self.enrich_item(item, response)
+    
+    def enrich_item(self, item: TribunaDecisionItem, response: Response) -> TribunaDecisionItem:
+        """Enrichit un item avec les métadonnées communes"""
+        if not item.get('pdf_url'):
+            return None
+        
+        # Métadonnées source
+        item['source'] = response.url.split('/')[2]
+        item['locale'] = self.normalizer.guess_locale(response.url, response.text)
+        item['detail_url'] = response.url
+        
+        # Parse les paramètres ServletDownload
+        if item.get('pdf_url') and not item.get('pdf_params'):
+            item['pdf_params'] = self.normalizer.parse_servlet_url(item['pdf_url'])
+            item['pdf_id'] = item['pdf_params'].get('pdf_id')
+        
+        # Timestamp
+        item['scraped_at'] = datetime.now(self.timezone).isoformat()
+        
+        # Date de publication par défaut
+        if not item.get('publication_date') and item.get('decision_date'):
+            item['publication_date'] = item['decision_date']
+        
+        return item
+    
+    def find_export_links(self, response: Response) -> list:
+        """Trouve les liens d'export (CSV, XLS, etc.)"""
+        export_urls = []
+        
+        # Patterns d'export courants
+        selectors = [
+            'a[href*="export"]',
+            'a[href*=".csv"]',
+            'a[href*=".xls"]',
+            'button[onclick*="export"]',
+            'a:contains("Export")',
+            'a:contains("Télécharger")',
+            'a:contains("Download")',
+        ]
+        
+        for selector in selectors:
+            links = response.css(selector + '::attr(href)').getall()
+            export_urls.extend([urljoin(response.url, link) for link in links])
+        
+        return list(set(export_urls))  # Dédupliquer
+    
+    def get_next_page(self, response: Response) -> Optional[str]:
+        """Trouve le lien vers la page suivante"""
+        # Patterns de pagination courants
+        next_link = (
+            response.css('a.next::attr(href)').get() or
+            response.css('a[rel="next"]::attr(href)').get() or
+            response.css('.pagination a:contains("»")::attr(href)').get() or
+            response.css('.pagination a:contains("Suivant")::attr(href)').get()
+        )
+        
+        if next_link:
+            return urljoin(response.url, next_link)
+        
+        return None
+    
+    def parse_export(self, response: Response) -> Iterator[TribunaDecisionItem]:
+        """Parse un fichier d'export (à implémenter selon le format)"""
+        self.logger.info(f"Export trouvé: {response.url}")
+        # TODO: Implémenter le parsing CSV/XLS
+        return []
+
+# ========================================
+# tribuna_scraper/spiders/fribourg.py
+from .base_tribuna import BaseTribunaSpider
+
+class FribourgSpider(BaseTribunaSpider):
+    """Spider spécifique pour le Tribunal cantonal de Fribourg"""
+    
+    name = 'fribourg'
+    allowed_domains = ['publicationtc.fr.ch']
+    start_urls = [
+        'https://publicationtc.fr.ch/?locale=fr',
+        # Ajouter d'autres URLs de départ si nécessaire
+    ]
+    
+    custom_settings = {
+        **BaseTribunaSpider.custom_settings,
+        'DOWNLOAD_DELAY': 2,  # Plus conservateur pour Fribourg
+    }
+    
+    def parse_decisions_list(self, response):
+        """
+        Override pour gérer les spécificités de Fribourg
+        """
+        # Utiliser d'abord la méthode parent
+        for item in super().parse_decisions_list(response):
+            # Enrichissement spécifique à Fribourg
+            if not item.get('court') and 'Cour d\'appel' in response.text:
+                # Extraire la juridiction depuis le contexte
+                court_text = response.css('.court-name::text').get()
+                if court_text:
+                    item['court'] = court_text.strip()
+            
+            yield item
+
+# ========================================
+# tribuna_scraper/pipelines.py
+import hashlib
+import json
+from datetime import datetime
+from pathlib import Path
+from scrapy.exceptions import DropItem
+import scrapy
+from scrapy.pipelines.files import FilesPipeline
+
+class ValidationPipeline:
+    """Valide et nettoie les items"""
+    
+    def process_item(self, item, spider):
+        # Validation minimale
+        if not item.get('pdf_url'):
+            raise DropItem(f"Item sans PDF URL: {item}")
+        
+        # Nettoyer les champs vides
+        for field in item.fields:
+            if item.get(field) == '':
+                item[field] = None
+        
+        return item
+
+class DedupPipeline:
+    """Déduplique les décisions basé sur (source, pdf_id)"""
+    
+    def __init__(self):
+        self.seen = set()
+    
+    def process_item(self, item, spider):
+        key = (item.get('source'), item.get('pdf_id'))
+        
+        if key in self.seen:
+            raise DropItem(f"Doublon détecté: {key}")
+        
+        self.seen.add(key)
+        return item
+
+class PDFDownloadPipeline(FilesPipeline):
+    """Télécharge les PDFs et calcule leur hash"""
+    
+    def get_media_requests(self, item, info):
+        if item.get('pdf_url'):
+            yield scrapy.Request(
+                item['pdf_url'],
+                meta={'item': item}
+            )
+    
+    def file_path(self, request, response=None, info=None, *, item=None):
+        """Génère le chemin de stockage du PDF"""
+        if not item:
+            item = request.meta.get('item', {})
+        
+        source = item.get('source', 'unknown')
+        date = item.get('decision_date', 'no-date')
+        docket = item.get('docket_number', 'no-docket').replace('/', '_')
+        
+        return f"{source}/{date}/{docket}.pdf"
+    
+    def item_completed(self, results, item, info):
+        """Appelé quand le téléchargement est terminé"""
+        if results:
+            ok, file_info = results[0]
+            if ok:
+                item['pdf_path'] = file_info['path']
+                # Calculer le SHA256
+                if 'checksum' in file_info:
+                    item['pdf_sha256'] = file_info['checksum']
+        
+        return item
+
+class JSONLExportPipeline:
+    """Exporte les items en format JSONL (NDJSON)"""
+    
+    def __init__(self):
+        self.file = None
+    
+    def open_spider(self, spider):
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"output/tribuna_{spider.name}_{timestamp}.jsonl"
+        Path("output").mkdir(exist_ok=True)
+        self.file = open(filename, 'w', encoding='utf-8')
+    
+    def close_spider(self, spider):
+        if self.file:
+            self.file.close()
+    
+    def process_item(self, item, spider):
+        line = json.dumps(dict(item), ensure_ascii=False) + '\n'
+        self.file.write(line)
+        return item
+
+# ========================================
+# tribuna_scraper/settings.py
+BOT_NAME = 'tribuna_scraper'
+
+SPIDER_MODULES = ['tribuna_scraper.spiders']
+NEWSPIDER_MODULE = 'tribuna_scraper.spiders'
+
+# Obey robots.txt rules
+ROBOTSTXT_OBEY = True
+
+# Configure pipelines
+ITEM_PIPELINES = {
+    'tribuna_scraper.pipelines.ValidationPipeline': 100,
+    'tribuna_scraper.pipelines.DedupPipeline': 200,
+    'tribuna_scraper.pipelines.PDFDownloadPipeline': 300,
+    'tribuna_scraper.pipelines.JSONLExportPipeline': 400,
+}
+
+# Fichiers (PDFs)
+FILES_STORE = 'downloads'
+MEDIA_ALLOW_REDIRECTS = True
+
+# Configure a delay for requests for the same website
+DOWNLOAD_DELAY = 1
+CONCURRENT_REQUESTS = 2
+CONCURRENT_REQUESTS_PER_DOMAIN = 2
+
+# AutoThrottle
+AUTOTHROTTLE_ENABLED = True
+AUTOTHROTTLE_START_DELAY = 1
+AUTOTHROTTLE_MAX_DELAY = 10
+AUTOTHROTTLE_TARGET_CONCURRENCY = 2.0
+
+# User agent
+USER_AGENT = 'TribunaScraper/1.0 (+https://github.com/entscheidsuche/NeueScraper)'
+
+# Logging
+LOG_LEVEL = 'INFO'
+
+# Retry
+RETRY_TIMES = 3
+RETRY_HTTP_CODES = [500, 502, 503, 504, 408, 429]
+
+# Cache HTTP (développement)
+HTTPCACHE_ENABLED = False
+HTTPCACHE_EXPIRATION_SECS = 3600
+HTTPCACHE_DIR = 'httpcache'
+
+# Encodage
+FEED_EXPORT_ENCODING = 'utf-8'

@@ -1,0 +1,363 @@
+# all_tribuna_spiders.py
+"""
+Implémentation complète pour tous les cantons utilisant Tribuna
+Basé sur la recherche des instances Tribuna en Suisse
+"""
+
+from tribuna_base import TribunaBaseSpider
+
+# ===============================================
+# 1. FRIBOURG - Confirmé fonctionnel
+class FribourgSpider(TribunaBaseSpider):
+    """
+    Tribunal cantonal de Fribourg
+    ~13,563 décisions
+    Bilingue FR/DE
+    """
+    name = 'tribuna_fribourg'
+    canton_name = 'Fribourg'
+    
+    start_urls = [
+        'https://publicationtc.fr.ch/',
+        'https://publicationtc.fr.ch/?locale=fr',
+        'https://publicationtc.fr.ch/?locale=de',
+    ]
+
+# ===============================================
+# 2. GRISONS - Confirmé (URLs à valider)
+class GrisonsSpider(TribunaBaseSpider):
+    """
+    Kantonsgericht Graubünden
+    ~14,043 décisions
+    Trilingue DE/IT/RM
+    """
+    name = 'tribuna_grisons'
+    canton_name = 'Graubünden'
+    
+    start_urls = [
+        # URLs probables basées sur le pattern Tribuna
+        'https://www.gr.ch/DE/institutionen/justiz/kg/entscheide',
+        'https://entscheide.gerichte-gr.ch/',  # À confirmer
+        # Variantes linguistiques
+        'https://entscheide.gerichte-gr.ch/?locale=de',
+        'https://entscheide.gerichte-gr.ch/?locale=it',
+        'https://entscheide.gerichte-gr.ch/?locale=rm',
+    ]
+    
+    def extract_court_from_context(self, element, response):
+        """Override pour gérer le romanche"""
+        court = super().extract_court_from_context(element, response)
+        
+        # Mappings spécifiques Grisons
+        if not court:
+            text = ' '.join(element.css('::text').getall()).lower()
+            grisons_courts = {
+                'derschader chantunal': 'Kantonsgericht',
+                'dretgira chantunala': 'Kantonsgericht',
+                'tribunal administrativ': 'Verwaltungsgericht',
+            }
+            for pattern, name in grisons_courts.items():
+                if pattern in text:
+                    return name
+        
+        return court
+
+# ===============================================
+# 3. VALAIS - À confirmer
+class ValaisSpider(TribunaBaseSpider):
+    """
+    Tribunal cantonal du Valais
+    Bilingue FR/DE
+    """
+    name = 'tribuna_valais'
+    canton_name = 'Valais'
+    
+    start_urls = [
+        # URLs probables
+        'https://www.vs.ch/web/justice/tribunal-cantonal',
+        'https://tribunaux.vs.ch/',  # À valider
+        'https://decisions.tc-vs.ch/',  # À valider
+    ]
+
+# ===============================================
+# 4. TESSIN - À confirmer
+class TessinSpider(TribunaBaseSpider):
+    """
+    Tribunali del Canton Ticino
+    Principalement IT
+    """
+    name = 'tribuna_ticino'
+    canton_name = 'Ticino'
+    
+    start_urls = [
+        'https://www.ti.ch/giustizia',
+        'https://sentenze.ti.ch/',  # À valider
+        'https://www4.ti.ch/giustizia/sentenze/',  # À valider
+    ]
+    
+    # Override pour l'italien
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Ajouter des patterns italiens
+        self.COURT_MAPPINGS['it'].update({
+            'pretura': 'Pretura',
+            'tribunale di appello': 'Tribunale di appello',
+            'camera di esecuzione': 'Camera di esecuzione e fallimenti',
+        })
+
+# ===============================================
+# 5. SCHAFFHOUSE - À confirmer
+class SchaffhouseSpider(TribunaBaseSpider):
+    """
+    Schaffhauser Gerichte
+    Principalement DE
+    """
+    name = 'tribuna_schaffhausen'
+    canton_name = 'Schaffhausen'
+    
+    start_urls = [
+        'https://www.sh.ch/gerichte',
+        'https://entscheide.sh.ch/',  # À valider
+        'https://gerichte-sh.ch/entscheide/',  # À valider
+    ]
+
+# ===============================================
+# 6. OBWALD - À confirmer
+class ObwaldSpider(TribunaBaseSpider):
+    """
+    Gerichte Obwalden
+    Principalement DE
+    """
+    name = 'tribuna_obwalden'
+    canton_name = 'Obwalden'
+    
+    start_urls = [
+        'https://www.ow.ch/gerichte',
+        'https://entscheide.ow.ch/',  # À valider
+        'https://www.ow.ch/gerichte/entscheide',  # À valider
+    ]
+
+# ===============================================
+# 7. NIDWALD - À confirmer
+class NidwaldSpider(TribunaBaseSpider):
+    """
+    Gerichte Nidwalden
+    Principalement DE
+    """
+    name = 'tribuna_nidwalden'
+    canton_name = 'Nidwalden'
+    
+    start_urls = [
+        'https://www.nw.ch/gerichte',
+        'https://entscheide.nw.ch/',  # À valider
+        'https://gerichte.nw.ch/publikationen',  # À valider
+    ]
+
+# ===============================================
+# 8. APPENZELL RHODES-INTÉRIEURES - À confirmer
+class AppenzellIRSpider(TribunaBaseSpider):
+    """
+    Gerichte Appenzell Innerrhoden
+    Principalement DE
+    """
+    name = 'tribuna_appenzell_ir'
+    canton_name = 'Appenzell_IR'
+    
+    start_urls = [
+        'https://www.ai.ch/gerichte',
+        'https://entscheide.ai.ch/',  # À valider
+    ]
+
+# ===============================================
+# 9. GLARIS - Possible
+class GlarisSpider(TribunaBaseSpider):
+    """
+    Glarner Gerichte
+    Principalement DE
+    """
+    name = 'tribuna_glarus'
+    canton_name = 'Glarus'
+    
+    start_urls = [
+        'https://www.gl.ch/gerichte',
+        'https://entscheide.gl.ch/',  # À valider
+    ]
+
+# ===============================================
+# SPIDER UNIVERSEL - Pour découverte
+class TribunaUniversalSpider(TribunaBaseSpider):
+    """
+    Spider générique pour tester une nouvelle instance Tribuna
+    """
+    name = 'tribuna_universal'
+    
+    def __init__(self, canton_name=None, start_url=None, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        
+        if canton_name:
+            self.canton_name = canton_name
+        
+        if start_url:
+            self.start_urls = [start_url]
+            # Ajouter automatiquement les variantes linguistiques
+            base_url = start_url.split('?')[0]
+            self.start_urls.extend([
+                f"{base_url}?locale=fr",
+                f"{base_url}?locale=de",
+                f"{base_url}?locale=it",
+            ])
+    
+    def parse(self, response):
+        """Override pour logger la structure détectée"""
+        self.logger.info(f"Analyse de {response.url}")
+        
+        # Détecter les patterns Tribuna
+        tribuna_indicators = [
+            'tribunavtplus',
+            'ServletDownload',
+            'dossiernummer',
+            'Delta Logic',
+            'gwt-rpc',
+        ]
+        
+        page_content = response.text.lower()
+        found_indicators = [ind for ind in tribuna_indicators if ind.lower() in page_content]
+        
+        if found_indicators:
+            self.logger.info(f"✅ Indicateurs Tribuna trouvés: {found_indicators}")
+        else:
+            self.logger.warning("⚠️ Aucun indicateur Tribuna trouvé")
+        
+        # Continuer avec le parsing normal
+        yield from super().parse(response)
+
+# ===============================================
+# run_all_tribuna.py - Script pour lancer tous les cantons
+"""
+Script pour gérer tous les spiders Tribuna
+"""
+
+CONFIRMED_CANTONS = [
+    'tribuna_fribourg',
+    'tribuna_grisons',
+]
+
+POTENTIAL_CANTONS = [
+    'tribuna_valais',
+    'tribuna_ticino',
+    'tribuna_schaffhausen',
+    'tribuna_obwalden',
+    'tribuna_nidwalden',
+    'tribuna_appenzell_ir',
+    'tribuna_glarus',
+]
+
+def run_all_initial():
+    """Lance la collecte initiale pour tous les cantons confirmés"""
+    import subprocess
+    from datetime import datetime
+    
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    
+    for spider in CONFIRMED_CANTONS:
+        print(f"\n{'='*60}")
+        print(f"🕷️ Lancement INITIAL: {spider}")
+        print(f"{'='*60}")
+        
+        cmd = [
+            'scrapy', 'crawl', spider,
+            '-a', 'mode=INITIAL',
+            '-o', f'output/{spider}_initial_{timestamp}.jsonl',
+            '-L', 'INFO'
+        ]
+        
+        result = subprocess.run(cmd)
+        
+        if result.returncode == 0:
+            print(f"✅ {spider} terminé avec succès")
+        else:
+            print(f"❌ {spider} a échoué avec code {result.returncode}")
+
+def run_all_updates(days_back=8):
+    """Lance les mises à jour pour tous les cantons confirmés"""
+    import subprocess
+    from datetime import datetime
+    
+    timestamp = datetime.now().strftime('%Y%m%d')
+    
+    for spider in CONFIRMED_CANTONS:
+        print(f"\n{'='*60}")
+        print(f"🕷️ Lancement UPDATE: {spider} (derniers {days_back} jours)")
+        print(f"{'='*60}")
+        
+        cmd = [
+            'scrapy', 'crawl', spider,
+            '-a', 'mode=UPDATE',
+            '-a', f'days_back={days_back}',
+            '-o', f'output/{spider}_update_{timestamp}.jsonl',
+            '-L', 'INFO'
+        ]
+        
+        result = subprocess.run(cmd)
+        
+        if result.returncode == 0:
+            print(f"✅ {spider} mis à jour")
+        else:
+            print(f"❌ {spider} échec mise à jour")
+
+def discover_tribuna_sites():
+    """Teste les URLs potentielles pour découvrir de nouvelles instances Tribuna"""
+    import subprocess
+    
+    test_urls = [
+        ('Valais', 'https://decisions.tc-vs.ch/'),
+        ('Ticino', 'https://sentenze.ti.ch/'),
+        ('Schaffhausen', 'https://entscheide.sh.ch/'),
+        ('Obwalden', 'https://entscheide.ow.ch/'),
+        ('Nidwalden', 'https://entscheide.nw.ch/'),
+        ('Appenzell_IR', 'https://entscheide.ai.ch/'),
+        ('Glarus', 'https://entscheide.gl.ch/'),
+    ]
+    
+    print("🔍 Découverte des instances Tribuna...")
+    print("="*60)
+    
+    for canton, url in test_urls:
+        print(f"\n📍 Test {canton}: {url}")
+        
+        cmd = [
+            'scrapy', 'crawl', 'tribuna_universal',
+            '-a', f'canton_name={canton}',
+            '-a', f'start_url={url}',
+            '-a', 'mode=UPDATE',
+            '-a', 'days_back=1',  # Test rapide
+            '-L', 'INFO'
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if 'Indicateurs Tribuna trouvés' in result.stdout:
+            print(f"  ✅ CONFIRMÉ: {canton} utilise Tribuna!")
+        elif '404' in result.stdout or 'DNS' in result.stdout:
+            print(f"  ❌ URL invalide")
+        else:
+            print(f"  ⚠️  À vérifier manuellement")
+
+if __name__ == '__main__':
+    import sys
+    
+    if len(sys.argv) > 1:
+        command = sys.argv[1]
+        
+        if command == 'initial':
+            run_all_initial()
+        elif command == 'update':
+            days = int(sys.argv[2]) if len(sys.argv) > 2 else 8
+            run_all_updates(days)
+        elif command == 'discover':
+            discover_tribuna_sites()
+        else:
+            print("Usage: python run_all_tribuna.py [initial|update|discover] [days]")
+    else:
+        # Par défaut, lance les updates
+        run_all_updates()

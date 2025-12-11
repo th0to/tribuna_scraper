@@ -1,0 +1,315 @@
+# Dockerfile
+FROM python:3.11-slim
+
+# Dépendances système
+RUN apt-get update && apt-get install -y \
+    gcc \
+    libxml2-dev \
+    libxslt1-dev \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Installer Poetry
+RUN pip install poetry
+
+# Copier fichiers de dépendances
+COPY pyproject.toml poetry.lock* ./
+
+# Installer dépendances sans dev
+RUN poetry config virtualenvs.create false \
+    && poetry install --no-dev --no-interaction --no-ansi
+
+# Copier code source
+COPY tribuna_scraper ./tribuna_scraper
+COPY scrapy.cfg .
+
+# Créer dossiers output
+RUN mkdir -p output downloads logs
+
+# User non-root
+RUN useradd -m -u 1000 scraper && \
+    chown -R scraper:scraper /app
+USER scraper
+
+# Commande par défaut
+CMD ["scrapy", "list"]
+
+# ========================================
+# docker-compose.yml
+version: '3.8'
+
+services:
+  tribuna-scraper:
+    build: .
+    container_name: tribuna-scraper
+    volumes:
+      - ./output:/app/output
+      - ./downloads:/app/downloads
+      - ./logs:/app/logs
+    environment:
+      - SCRAPY_SETTINGS_MODULE=tribuna_scraper.settings
+      - TZ=Europe/Zurich
+    command: scrapy crawl fribourg -L INFO
+
+  # Service cron pour exécution planifiée
+  tribuna-scheduler:
+    build: .
+    container_name: tribuna-scheduler
+    volumes:
+      - ./output:/app/output
+      - ./downloads:/app/downloads
+      - ./logs:/app/logs
+      - ./scripts/crontab:/etc/cron.d/tribuna
+    environment:
+      - SCRAPY_SETTINGS_MODULE=tribuna_scraper.settings
+      - TZ=Europe/Zurich
+    command: cron -f
+
+  # MongoDB pour stockage (optionnel)
+  mongodb:
+    image: mongo:7
+    container_name: tribuna-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=secure_password
+
+volumes:
+  mongo-data:
+
+# ========================================
+# scripts/crontab
+# Exécution quotidienne à 2h du matin
+0 2 * * * root cd /app && scrapy crawl fribourg -o output/fribourg_$(date +\%Y\%m\%d).jsonl >> logs/cron.log 2>&1
+0 3 * * * root cd /app && scrapy crawl vaud -o output/vaud_$(date +\%Y\%m\%d).jsonl >> logs/cron.log 2>&1
+
+# ========================================
+# Makefile
+.PHONY: help install test crawl clean docker-build docker-run
+
+help: ## Affiche cette aide
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+
+install: ## Installe les dépendances
+	poetry install
+
+test: ## Lance les tests
+	poetry run pytest -v
+
+crawl-fribourg: ## Lance le spider Fribourg
+	poetry run scrapy crawl fribourg -o output/fribourg_$$(date +%Y%m%d_%H%M%S).jsonl
+
+crawl-all: ## Lance tous les spiders
+	@for spider in $$(poetry run scrapy list); do \
+		echo "🕷️ Lancement de $$spider..."; \
+		poetry run scrapy crawl $$spider -o output/$${spider}_$$(date +%Y%m%d).jsonl; \
+	done
+
+clean: ## Nettoie les fichiers temporaires
+	rm -rf __pycache__ .pytest_cache .scrapy
+	find . -type f -name "*.pyc" -delete
+
+docker-build: ## Construit l'image Docker
+	docker build -t tribuna-scraper:latest .
+
+docker-run: ## Lance le scraper dans Docker
+	docker-compose up -d
+
+docker-logs: ## Affiche les logs Docker
+	docker-compose logs -f
+
+docker-stop: ## Arrête les containers
+	docker-compose down
+
+# ========================================
+# scripts/monitor.py
+#!/usr/bin/env python3
+"""
+Script de monitoring pour vérifier l'état des scrapers
+"""
+import json
+import sys
+from pathlib import Path
+from datetime import datetime, timedelta
+from collections import defaultdict
+
+def analyze_scraping_results(output_dir="output", days_back=7):
+    """Analyse les résultats de scraping récents"""
+    output_path = Path(output_dir)
+    cutoff_date = datetime.now() - timedelta(days=days_back)
+    
+    stats = defaultdict(lambda: {
+        'total': 0,
+        'recent': 0,
+        'errors': 0,
+        'files': []
+    })
+    
+    for jsonl_file in output_path.glob("*.jsonl"):
+        spider_name = jsonl_file.stem.split('_')[0]
+        file_date = datetime.fromtimestamp(jsonl_file.stat().st_mtime)
+        
+        if file_date < cutoff_date:
+            continue
+            
+        stats[spider_name]['files'].append(jsonl_file.name)
+        
+        with open(jsonl_file) as f:
+            for line in f:
+                try:
+                    item = json.loads(line)
+                    stats[spider_name]['total'] += 1
+                    
+                    # Vérifier si c'est une décision récente
+                    pub_date = datetime.fromisoformat(item.get('publication_date', ''))
+                    if pub_date >= cutoff_date:
+                        stats[spider_name]['recent'] += 1
+                        
+                except (json.JSONDecodeError, ValueError) as e:
+                    stats[spider_name]['errors'] += 1
+    
+    # Rapport
+    print(f"📊 Rapport de monitoring - Derniers {days_back} jours\n")
+    print("=" * 60)
+    
+    for spider, data in stats.items():
+        print(f"\n🕷️  {spider.upper()}")
+        print(f"   Total décisions: {data['total']}")
+        print(f"   Décisions récentes: {data['recent']}")
+        print(f"   Erreurs: {data['errors']}")
+        print(f"   Fichiers: {', '.join(data['files'][:3])}")
+        
+        # Alertes
+        if data['errors'] > 10:
+            print(f"   ⚠️  ALERTE: Taux d'erreur élevé!")
+        if data['recent'] == 0 and data['total'] > 0:
+            print(f"   ⚠️  ALERTE: Aucune décision récente!")
+    
+    print("\n" + "=" * 60)
+    return stats
+
+def check_pdf_downloads(downloads_dir="downloads"):
+    """Vérifie l'état des téléchargements PDF"""
+    downloads_path = Path(downloads_dir)
+    
+    if not downloads_path.exists():
+        print("⚠️  Dossier downloads non trouvé")
+        return
+    
+    pdf_count = len(list(downloads_path.glob("**/*.pdf")))
+    total_size = sum(f.stat().st_size for f in downloads_path.glob("**/*.pdf"))
+    
+    print(f"\n📁 PDFs téléchargés:")
+    print(f"   Nombre: {pdf_count}")
+    print(f"   Taille totale: {total_size / (1024*1024):.2f} MB")
+    
+    # Vérifier les PDFs récents
+    recent_pdfs = []
+    cutoff = datetime.now() - timedelta(days=1)
+    
+    for pdf in downloads_path.glob("**/*.pdf"):
+        if datetime.fromtimestamp(pdf.stat().st_mtime) >= cutoff:
+            recent_pdfs.append(pdf.name)
+    
+    print(f"   PDFs des 24h: {len(recent_pdfs)}")
+    
+    if len(recent_pdfs) == 0:
+        print("   ⚠️  ALERTE: Aucun PDF téléchargé récemment!")
+
+if __name__ == "__main__":
+    # Analyse principale
+    stats = analyze_scraping_results()
+    check_pdf_downloads()
+    
+    # Code de sortie pour CI/CD
+    total_errors = sum(s['errors'] for s in stats.values())
+    sys.exit(1 if total_errors > 50 else 0)
+
+# ========================================
+# .github/workflows/scraper.yml
+name: Tribuna Scraper CI/CD
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Exécution quotidienne à 3h UTC (4h ou 5h Suisse selon saison)
+    - cron: '0 3 * * *'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install Poetry
+      run: |
+        curl -sSL https://install.python-poetry.org | python3 -
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+    
+    - name: Install dependencies
+      run: poetry install
+    
+    - name: Run tests
+      run: poetry run pytest -v --cov=tribuna_scraper
+    
+    - name: Lint code
+      run: |
+        poetry run black --check tribuna_scraper
+        poetry run pylint tribuna_scraper
+
+  scrape:
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'schedule' || github.ref == 'refs/heads/main'
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install Poetry
+      run: |
+        curl -sSL https://install.python-poetry.org | python3 -
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+    
+    - name: Install dependencies
+      run: poetry install --no-dev
+    
+    - name: Run Fribourg scraper
+      run: |
+        poetry run scrapy crawl fribourg -o output/fribourg_$(date +%Y%m%d).jsonl
+      continue-on-error: true
+    
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: scraping-results
+        path: output/*.jsonl
+        retention-days: 30
+    
+    - name: Monitor results
+      run: poetry run python scripts/monitor.py
+    
+    - name: Upload to S3 (if configured)
+      if: env.AWS_ACCESS_KEY_ID != ''
+      env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      run: |
+        aws s3 sync output/ s3://${{ secrets.S3_BUCKET }}/tribuna-decisions/

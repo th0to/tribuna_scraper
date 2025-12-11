@@ -1,0 +1,488 @@
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta http-equiv="content-type" content="text/html; charset=UTF-8">
+<!--                                                               -->
+<!-- Consider inlining CSS to reduce the number of requested files -->
+<!--                                                               -->
+<link type="text/css" rel="stylesheet" href="TribunaSmallFont.css">
+<link type="text/css" rel="stylesheet" href="TribunaVTPlus.css">
+<link type="text/css" rel="stylesheet" href="TribunaVTPlus_resp.css">
+<link type="text/css" rel="stylesheet" href="TribunaVTPlus_Customer.css">
+<link type="text/css" rel="stylesheet" href="SenchaToolTip.css">
+<link type="text/css" rel="stylesheet" href="TribunaCalendar.css">
+<link type="text/css" rel="stylesheet" href="fontsCSS/font-tribuna.css">
+<link type="text/css" rel="stylesheet" href="fontsCSS/font-awesome.css">
+<link type="text/css" rel="stylesheet" href="fontsCSS/font-ubuntu.css">
+<link type="text/css" rel="stylesheet" href="fontsCSS/font-tradegothic.css">
+<link type="text/css" rel="stylesheet" href="css/TribunaBackend.css">
+
+<link rel="icon" href="favicon.ico" type="image/x-icon">
+<!--<link rel="stylesheet" type="text/css" href="http://fonts.googleapis.com/css?family=Ubuntu:300,400,500,700" />-->
+<!--<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/font-awesome/4.4.0/css/font-awesome.min.css">-->
+<!--                                           -->
+<!-- This script loads your compiled module.   -->
+<!-- If you add any GWT meta tags, they must   -->
+<!-- be added before this line.                -->
+<!--                                           -->
+<script type="text/javascript" src="tribunavtplus/tribunavtplus.nocache.js"></script><link rel="stylesheet" href="https://publicationtc.fr.ch/tribunavtplus/reset.css"><script src="https://publicationtc.fr.ch/tribunavtplus/B525B824EC0404CBA1F90C65306F5CB9.cache.js"></script>
+<script type="text/javascript" src="TribunaVTPlusSprachfile.js"></script>
+<script type="text/javascript" src="TribunaVTPlusVersion.js"></script>
+<script type="text/javascript" src="HTMLToolTip.js"></script>
+<script type="text/javascript" src="TribunaChangeFontSize.js"></script>
+<script type="text/javascript">
+	var timeoutvar;
+	var lastinfo;
+	var xpage;
+	var ypage;
+	var returnTextSelection = "";
+	function change() {
+		try {
+			// check browser compatibility
+			if (!window.getSelection) {
+				returnTextSelection = 'ERRSEL003';
+			}
+
+			// get selection, initialize some local variables
+			var sel = window.getSelection(), r, o, b, d, h, m, df = function(p) {
+				while (p) {
+					if (p.nodeType == 1
+							&& p.className.indexOf('onlyVerticalScroll') >= 0)
+						return true;
+					p = p.parentNode;
+				}
+			}, s = /^\s$/, x = /[^A-Za-z0-9_\u00C0-\u02B8]/, t = [], f = function(
+					a, b) {
+				if (b > a)
+					t.push(sel.substring(a, b));
+			}, c = [], cd, a = function(v) {
+				var i, t;
+				v = v ? v.split(',') : [];
+				for (i = 0; i < v.length; ++i)
+					if ((t = v[i]) && c.indexOf(t) < 0)
+						c.push(t);
+			}, da = 'data-norm', ap = function(p) {
+				if (p && p.tagName == 'SPAN')
+					a(p.getAttribute(da));
+			}, dl = '?!@';
+
+			// validate selection
+			if (sel.rangeCount != 1 || !(r = sel.getRangeAt(0)) || r.collapsed)
+				return 'ERRSEL004';
+
+			// snap selection to word boundaries
+			if ((m = r.startContainer.nodeValue) && (b = r.startOffset) > 0) {
+				while (b < r.startContainer.length && s.test(m.substr(b, 1)))
+					++b;
+				r.setStart(r.startContainer, (o = m.substr(0, b).split('')
+						.reverse().join('').search(x)) < 0 ? 0 : (b - o));
+			}
+			if ((m = r.endContainer.nodeValue)
+					&& (b = r.endOffset) < r.endContainer.length) {
+				while (b > 0 && s.test(m.substr(b - 1, 1)))
+					--b;
+				r.setEnd(r.endContainer,
+						(o = m.substr(b).search(x)) < 0 ? r.endContainer.length
+								: (b + o));
+			}
+
+			// update selection range in UI
+			sel.removeAllRanges();
+			sel.addRange(r);
+
+			// validate document
+			if (!df(r.startContainer) || !df(r.endContainer))
+				return 'ERRSEL006';
+
+			// validate selection, again
+			if (r.collapsed)
+				return 'ERRSEL004';
+
+			// fetch selection content
+			d = document.createElement('div');
+			d.appendChild(r.cloneContents());
+			h = d.innerHTML;
+
+			// look for unsupported HTML tags
+			x = /<(\w+)[^>]*>/g;
+			while (m = x.exec(h)) {
+				if (m.length == 2
+						&& m[1] != 'br'
+						&& (m[1] != 'span' || m[0]
+								.search(/id="n\d+"|class="edit"/) < 0))
+					return 'ERRSEL002';
+			}
+
+			// extract tokens
+			sel = sel.toString();
+			x = /\s|[\x21-\x2F\x3A-\x40\x5B-\x60\x7B-\x7E]|\d\D|\D\d/g;
+			o = 0;
+			while (m = x.exec(sel)) {
+				if (s.test(m[0])) {
+					f(o, m.index);
+				} else if (m[0].length == 2) {
+					f(o, m.index + 1);
+				} else {
+					f(o, m.index);
+					f(m.index, m.index + 1);
+				}
+				o = m.index + 1;
+			}
+			f(o, sel.length);
+			if (t.length < 3)
+				return 'ERRSEL001';
+			t = t.join(' ');
+
+			// extract norms
+			for (o = 0; o < 2; ++o) {
+				ap(r.startContainer.parentElement);
+				x = new RegExp(da + '="([^"]+)', 'g');
+				while (m = x.exec(h))
+					a(m[1]);
+				ap(r.endContainer.parentElement);
+				da = 'data-orig';
+				if (o == 0)
+					cd = c, c = [];
+			}
+
+			// return the results
+			returnTextSelection = cd.join(',') + dl + c.join(',') + dl + sel
+					+ dl + t;
+			return returnTextSelection;
+			//return cd.join(',') + dl + c.join(',') + dl + sel + dl + t;
+
+		} catch (ex) {
+			// unexpected exception
+			console.log('sel exception: ' + ex);
+			return "ERRSEL005";
+		}
+	}
+	function changeTitle(titel) {
+		document.title = titel;
+	}
+	function goword(w) {
+		var el = document.getElementById('w' + w);
+		if (el)
+			el.scrollIntoView(true);
+	}
+	function zoom(zoom) {
+		document.body.style.zoom = zoom;
+	}
+
+	function sprungpunktnachsucheaufrufen() {
+
+		var el = document.getElementById('w0');
+		if (el) {
+			el.scrollIntoView(true);
+		} else {
+			var y = document.getElementsByName('normfirst');
+			var aNode = y[0];
+			if (aNode)
+				aNode.scrollIntoView(true);
+		}
+
+	}
+	if (window.netscape) {
+		document.captureEvents(Event.MOUSEOVER);
+	}
+
+	function findPos(e) {
+		if (window.netscape) {
+			xpage = e.pageX;
+			ypage = e.pageY;
+		}
+	}
+
+	function showInfo(n, frominfo) {
+		clearTimeout(timeoutvar);
+		hideOpenLinkWindow();
+		var breiteursprung = document.getElementById("VerticalScrollPanel1").offsetWidth;
+		var hoeheursprung = document.getElementById("VerticalScrollPanel1").offsetHeight;
+		var pointerTop = 0;
+
+		var pointerLeft = 0;
+		if (window.netscape) {
+			document.onmouseover = findPos;
+			document.onmouseout = findPos;
+			pointerLeft = xpage;
+			pointerTop = ypage;
+		} else {
+			pointerTop = Math.round(event.clientY);
+			pointerLeft = Math.round(event.clientX);
+		}
+		var y99 = document.getElementById("VerticalScrollPanel1").offsetTop;
+		var x99 = document.getElementById("VerticalScrollPanel1").offsetLeft;
+		var el;
+		var dup;
+		var dupheight;
+		var prevheight;
+		var prevtop;
+		var breitejetzt;
+		var links;
+		var groessendifferenz;
+		var hoehejetzt;
+		var oben;
+		var groessendifferenz;
+		var span = document.getElementById('n' + n), info = document
+				.getElementById('norm' + n);
+		var el = span, ox = 0, oy = 0;
+
+		pointerTop = pointerTop - y99;
+		pointerLeft = pointerLeft - x99;
+
+		if (!frominfo) {
+
+			while (el) {
+				ox += el.offsetLeft;
+				if (el.localName == "td") {
+					if ((el.cellIndex > 0)) {
+						var prev = el;
+						while (prev.cellIndex > 0) {
+							prev = prev.previousElementSibling;
+
+							if (prev.localName == "td") {
+								ox = ox - prev.offsetWidth;
+							}
+						}
+						ox = ox - 8;
+
+					} else {
+						ox = ox - 8;
+					}
+
+					el = el.offsetParent;
+
+				} else {
+					el = el.offsetParent;
+				}
+
+			}
+
+			el = span;
+			while (el && el.id != 'VerticalScrollPanel1') {
+				oy += el.offsetTop;
+				el = el.offsetParent;
+			}
+
+			dup = span.cloneNode(false);
+			dup.innerHTML = 'A';
+			span.parentNode.appendChild(dup);
+			dupheight = dup.offsetHeight;
+			prevheight = span.offsetHeight;
+			prevtop = span.offsetTop;
+			info.style.top = (oy + dup.offsetHeight) + "px";
+			span.parentNode.removeChild(dup);
+
+			info.style.left = (pointerLeft - ox + span.offsetLeft) + "px";
+		}
+
+		if (info.style.visibility != "visible") {
+			info.style.visibility = "visible";
+			info.style.display = "block";
+
+			//Rechts �ber den Bildschirm hinaus?
+			breitejetzt = info.offsetLeft + info.offsetWidth + 20;
+			if (breitejetzt > breiteursprung) {
+				links = info.offsetLeft;
+				groessendifferenz = links - (breitejetzt - breiteursprung) - 25;
+				info.style.left = groessendifferenz + "px";
+			}
+
+			//Nach Unten �ber den Bildschirm hinaus?
+			if (!frominfo) {
+				if ((pointerTop - info.offsetTop - info.offsetHeight - y99 - 5) > (prevheight)) {
+					info.style.top = oy + span.offsetHeight + "px";
+				}
+
+				hoehejetzt = pointerTop + info.offsetHeight;
+				if (hoehejetzt > hoeheursprung) {
+					oben = info.offsetTop;
+					groessendifferenz = oben - (info.offsetHeight * 2 - 5);
+					info.style.top = groessendifferenz + "px";
+				}
+			}
+		}
+	}
+
+	function hideInfo(n) {
+		var info = document.getElementById('norm' + n);
+		lastinfo = info;
+		timeoutvar = setTimeout(function() {
+			info.style.visibility = "Hidden";
+			info.style.display = "none";
+		}, 1000);
+		//info.style.display = "none";
+
+	}
+	
+	showInfoW = function(num, fromInfo) {
+		clearTimeout(timeoutvar);
+		hideOpenLinkWindow();
+		var widthComponent = document.getElementById("vpDetailsDos").offsetWidth;
+		  if (typeof num == 'number') {
+		    var el = document.querySelector('#nw' + num),
+		      tip = document.querySelector('#nworm' + num);
+		    tip.style.display = 'block';
+		    tip.style.visibility = 'visible';
+		    tip.style.zIndex  = '2001';
+
+		    var top = el.offsetTop ? el.offsetTop : 0,
+		      left = el.offsetLeft ? el.offsetLeft : 0,
+		      offsetParent = el.offsetParent;
+		    // climb up to find out the position. because of the table layout
+		    while (!offsetParent.classList.contains('onlyVerticalScroll2')) {
+		      top += offsetParent.offsetTop ? offsetParent.offsetTop : 0;
+		      left += offsetParent.offsetLeft ? offsetParent.offsetLeft : 0;
+		      offsetParent = offsetParent.offsetParent;
+		    }
+		    
+		    tip.style.top = top + 15 + 'px'; // 15px height of element
+		    tip.style.left = left + 'px'
+		  //Rechts �ber den Bildschirm hinaus?
+			actualWidth = tip.offsetLeft + tip.offsetWidth + 20;
+			if (actualWidth > widthComponent) {
+				left = tip.offsetLeft;
+				difference = left - (actualWidth - widthComponent) - 25;
+				tip.style.left = difference + "px";
+			}
+
+		    
+		  }
+		}
+
+		hideInfoW = function(num) {
+		  var tip = document.querySelector('#nworm' + num);
+			lastinfo = tip;
+			timeoutvar = setTimeout(function() {
+		                  tip.style.visibility = "hidden";
+		                  tip.style.display = "none";
+		                  tip.style.zIndex  = '1';
+		            }, 1000);
+		}
+
+	
+	function hideOpenLinkWindow() {
+		if (lastinfo) {
+			lastinfo.style.visibility = "Hidden";
+			lastinfo.style.display = "none";
+		}
+
+	}
+
+	var lastMarkedId = '';
+	function marknorm(n) {
+		clearTimeout(timeoutvar);
+		hideOpenLinkWindow();
+		clearMarking(lastMarkedId);
+		lastMarkedId = 'n' + n;
+		var el = document.getElementById(lastMarkedId);
+		el.className = el.className + ' hilitefirst';
+		el.scrollIntoView(true);
+	}
+
+	function clearMarking(id) {
+		if (lastMarkedId) {
+			//alert(lastMarkedId);
+			if (document.getElementById(lastMarkedId)) {
+				document.getElementById(lastMarkedId).className = document
+						.getElementById(lastMarkedId).className.replace(
+						' hilitefirst', '');
+			}
+		}
+	}
+
+	function openwin(url) {
+		try {
+			window.open(url, '_blank');
+		} catch (ex) {
+			alert("URL kann nicht ge\u00F6ffnet werden, da der Browser aktuell nicht erreichbar ist. Bitte versuchen Sie es erneut. / URL ne peut pas \u00EAtre ouvert, puisque le navigateur n'est pas accessible actuellement. S'il vous pla\u00EEt, tentez-cela de nouveau.");
+		}
+
+	}
+	
+			// Listen for "resize" events.
+	window.addEventListener("resize", handleResizeEvent);
+	// --------------------------------------------------------------------------- //
+	// --------------------------------------------------------------------------- //
+
+	// handle window resize events.
+	function handleResizeEvent(event) {
+			var userAgent = navigator.userAgent.toLowerCase();
+			var clientHeight;
+			if (userAgent.indexOf("chrome") > -1 || userAgent.indexOf("edg") > -1) {
+				clientHeight = window.screen.height;
+			} else {
+				clientHeight = window.screen.height * window.devicePixelRatio;
+			}
+			if (clientHeight >= 1050 && window.innerHeight < 600) {
+				//console.log('The browser is NOT in fullscreen mode');
+				if (userAgent.indexOf("edg") > -1) {
+					//console.log("edge 84%");	
+					document.getElementById("content").style.height = "84%";
+				} else if (userAgent.indexOf("chrome") > -1) {
+					//console.log("chrome");	
+					document.getElementById("content").style.height = "77%";
+				} else if (userAgent.indexOf("trident") > -1) {
+					//console.log("IE");
+					document.getElementById("content").style.height = "77%";
+				} else {
+					console.log("FF");
+					document.getElementById("content").style.height = "84%";
+				}
+			} else {
+				//console.log('The browser is in fullscreen mode');
+				var zoomValue = window.devicePixelRatio;
+				var suchfeldAllesElement = document.getElementsByClassName("suchfeldAlles");
+				var sucheASTQuellenElement = document.getElementsByClassName("suche-ast-quellen");
+				var sucheSuggestNormenElement = document.getElementsByClassName("suche-suggest-normen");
+				suchfeldAllesElement[0].style.width = "714px";
+	            sucheSuggestNormenElement[0].style.width = "369px";	
+                sucheASTQuellenElement[0].style.minWidth  = "300px";
+				if (clientHeight == 1200) {
+					//console.log("In TribunaVTplus.java clientHeight == 1200");
+					if (zoomValue > 1 && zoomValue <= 1.25) {
+						//console.log("window.devicePixelRatio > 1 && window.devicePixelRatio <= 1.25 --> 89%");
+						document.getElementById("content").style.height = "89%";
+						//suchfeldAllesElement[0].style.width = "595px";
+						//sucheSuggestNormenElement[0].style.width = "250px";					
+					} else if (zoomValue > 1.25
+						&& zoomValue <= 1.5) {
+						//console.log("window.devicePixelRatio > 1.25 && window.devicePixelRatio <= 1.5 --> 87%");
+						document.getElementById("content").style.height = "87%";
+						//suchfeldAllesElement[0].style.width = "595px";
+						//sucheSuggestNormenElement[0].style.width = "250px";	
+						sucheASTQuellenElement[0].style.minWidth = "245px";
+					} else {
+						//console.log("window.devicePixelRatio == 1 --> 90%");
+						document.getElementById("content").style.height = "90%";
+						//suchfeldAllesElement[0].style.width = "714px";
+						//sucheSuggestNormenElement[0].style.width = "369px";
+					}
+				} else if (clientHeight == 1080) {
+					//console.log("In TribunaVTplus.java clientHeight == 1080");
+					if (zoomValue > 1 && zoomValue <= 1.25) {
+						//console.log("window.devicePixelRatio > 1 && window.devicePixelRatio <= 1.25 --> 88%");
+						document.getElementById("content").style.height = "88%";
+						//suchfeldAllesElement[0].style.width = "595px";
+						//sucheSuggestNormenElement[0].style.width = "250px";		
+					} else if (zoomValue > 1.25
+						&& zoomValue <= 1.5) {
+						//console.log("window.devicePixelRatio > 1.25 && window.devicePixelRatio <= 1.5 --> 85%");
+						document.getElementById("content").style.height = "85%";
+						suchfeldAllesElement[0].style.width = "612px";
+				        sucheSuggestNormenElement[0].style.width = "271px";	
+				        sucheASTQuellenElement[0].style.minWidth  = "300px";	
+					} else {
+
+						//console.log("window.devicePixelRatio == 1 --> 90%");
+						document.getElementById("content").style.height = "90%";
+						//suchfeldAllesElement[0].style.width = "714px";
+						//sucheSuggestNormenElement[0].style.width = "369px";
+					}
+				} else {
+					if (window.devicePixelRatio > 1 && window.devicePixelRatio <= 1.25) {
+						//console.log("window.devicePixelRatio > 1 && window.devicePixelRatio <= 1.25 --> 82%");
+						document.getElementById("content").style.height = "82%";
+						suchfeldAllesElement[0].style.width = "510px";
+						sucheSuggestNormenElement[0].style.width = "170px";
+						sucheASTQuellenElement[0].style.minWidth = "220px";
+					} else if (windo
+(Content truncated due to size limit. Use page ranges or line ranges to read remaining content)

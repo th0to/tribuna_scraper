@@ -1,0 +1,594 @@
+# tribuna_base.py - Spider de base pour tous les portails Tribuna
+"""
+Spider générique Tribuna pour extraction minimale:
+- Année de publication
+- URL du PDF
+- Cour/Instance (si disponible)
+
+Supporte deux modes:
+- INITIAL: récupère toutes les décisions
+- UPDATE: récupère les N derniers jours
+"""
+
+import scrapy
+from scrapy import Request
+from scrapy.http import Response
+from datetime import datetime, timedelta
+from urllib.parse import urljoin, urlparse, parse_qs
+import re
+import logging
+from typing import Optional, Iterator, Dict, Any
+
+class TribunaBaseSpider(scrapy.Spider):
+    """
+    Spider de base réutilisable pour tous les portails Tribuna
+    Compatible avec Scrapy 2.13.3 et infrastructure existante
+    """
+    
+    name = 'tribuna_base'
+    
+    # Configuration par défaut - conservative pour éviter les blocages
+    custom_settings = {
+        'DOWNLOAD_DELAY': 1.0,  # Comme tu utilises 0.75-1s
+        'CONCURRENT_REQUESTS': 1,
+        'CONCURRENT_REQUESTS_PER_DOMAIN': 1,
+        'AUTOTHROTTLE_ENABLED': True,
+        'AUTOTHROTTLE_TARGET_CONCURRENCY': 1.0,
+        'USER_AGENT': 'Mozilla/5.0 (compatible; JurisprudenceScraper/1.0)',
+        'COOKIES_ENABLED': True,
+        'ROBOTSTXT_OBEY': True,
+    }
+    
+    # À override par canton
+    canton_name = 'generic'
+    start_urls = []
+    
+    # Mapping multilingue pour les instances/cours
+    COURT_MAPPINGS = {
+        'fr': {
+            'cour d\'appel': 'Cour d\'appel',
+            'tribunal cantonal': 'Tribunal cantonal',
+            'cour administrative': 'Cour administrative',
+            'cour fiscale': 'Cour fiscale',
+            'cour des assurances': 'Cour des assurances sociales',
+        },
+        'de': {
+            'appellationsgericht': 'Appellationsgericht',
+            'kantonsgericht': 'Kantonsgericht',
+            'verwaltungsgericht': 'Verwaltungsgericht',
+            'steuergericht': 'Steuergericht',
+            'sozialversicherungsgericht': 'Sozialversicherungsgericht',
+        },
+        'it': {
+            'corte d\'appello': 'Corte d\'appello',
+            'tribunale cantonale': 'Tribunale cantonale',
+            'tribunale amministrativo': 'Tribunale amministrativo',
+            'tribunale fiscale': 'Tribunale fiscale',
+        }
+    }
+    
+    def __init__(self, mode='UPDATE', days_back=7, year_filter=None, *args, **kwargs):
+        """
+        Args:
+            mode: 'INITIAL' pour tout récupérer, 'UPDATE' pour les N derniers jours
+            days_back: nombre de jours à récupérer en mode UPDATE (défaut: 7)
+            year_filter: année spécifique à filtrer (ex: 2024)
+        """
+        super().__init__(*args, **kwargs)
+        self.mode = mode.upper()
+        self.days_back = int(days_back)
+        self.year_filter = int(year_filter) if year_filter else None
+        
+        # Date de coupure pour mode UPDATE
+        if self.mode == 'UPDATE':
+            self.cutoff_date = datetime.now() - timedelta(days=self.days_back)
+            self.logger.info(f"Mode UPDATE: récupération depuis {self.cutoff_date.strftime('%Y-%m-%d')}")
+        else:
+            self.logger.info(f"Mode INITIAL: récupération complète")
+            
+    def start_requests(self):
+        """Point d'entrée - cherche d'abord les exports avant de scraper"""
+        for url in self.start_urls:
+            # Essayer plusieurs endpoints d'export connus
+            export_endpoints = [
+                '/export',
+                '/download',
+                '/export.csv',
+                '/export.xlsx',
+                '/api/decisions',
+                '?export=csv',
+                '?export=xlsx'
+            ]
+            
+            # Tenter les exports d'abord (plus fiable que scraping HTML)
+            base_url = url.split('?')[0]
+            for endpoint in export_endpoints:
+                export_url = base_url + endpoint
+                yield Request(
+                    export_url,
+                    callback=self.parse_export,
+                    errback=self.export_failed,
+                    dont_filter=True,
+                    meta={'original_url': url}
+                )
+            
+            # Fallback sur parsing HTML standard
+            yield Request(url, callback=self.parse)
+    
+    def export_failed(self, failure):
+        """Si l'export échoue, on passe au parsing HTML"""
+        original_url = failure.request.meta.get('original_url')
+        if original_url:
+            yield Request(original_url, callback=self.parse)
+    
+    def parse(self, response: Response):
+        """Parse la page de listing/recherche"""
+        
+        # Stratégie 1: Chercher tous les liens ServletDownload directement
+        servlet_links = response.css('a[href*="ServletDownload"]')
+        if servlet_links:
+            self.logger.info(f"Trouvé {len(servlet_links)} liens ServletDownload directs")
+            for link in servlet_links:
+                item = self.extract_from_servlet_link(link, response)
+                if item and self.should_collect_item(item):
+                    yield item
+        
+        # Stratégie 2: Parser les tables
+        tables = response.css('table')
+        for table in tables:
+            for row in table.css('tr'):
+                if not row.css('th'):  # Skip header rows
+                    item = self.extract_from_table_row(row, response)
+                    if item and self.should_collect_item(item):
+                        yield item
+        
+        # Stratégie 3: Parser les divs/cards
+        for selector in ['div.decision', 'div.result', 'div.item', 'article', 'li.decision']:
+            for element in response.css(selector):
+                item = self.extract_from_element(element, response)
+                if item and self.should_collect_item(item):
+                    yield item
+        
+        # Pagination
+        yield from self.follow_pagination(response)
+        
+        # Si mode INITIAL et qu'on trouve des liens d'années
+        if self.mode == 'INITIAL':
+            yield from self.follow_year_links(response)
+    
+    def extract_from_servlet_link(self, link, response) -> Optional[Dict]:
+        """Extrait les données minimales depuis un lien ServletDownload"""
+        href = link.css('::attr(href)').get()
+        if not href:
+            return None
+            
+        pdf_url = urljoin(response.url, href)
+        
+        # Parser les paramètres de l'URL pour extraire des infos
+        parsed = urlparse(pdf_url)
+        params = parse_qs(parsed.query)
+        
+        # Extraire l'année depuis différentes sources possibles
+        year = self.extract_year_from_url(pdf_url)
+        if not year:
+            year = self.extract_year_from_text(link.get())
+        
+        # Extraire le titre/texte du lien
+        title = link.css('::text').get('').strip()
+        
+        # Essayer d'extraire la cour depuis le contexte
+        court = self.extract_court_from_context(link, response)
+        
+        item = {
+            'pdf_url': pdf_url,
+            'year': year,
+            'court': court,
+            'canton': self.canton_name,
+            'source_url': response.url,
+            'title': title,
+        }
+        
+        # Ajouter les paramètres Tribuna si présents
+        if 'dossiernummer' in params:
+            item['docket_number'] = params['dossiernummer'][0]
+        
+        return item
+    
+    def extract_from_table_row(self, row, response) -> Optional[Dict]:
+        """Extrait depuis une ligne de table"""
+        cells = row.css('td')
+        if len(cells) < 2:
+            return None
+        
+        # Chercher un lien PDF dans la ligne
+        pdf_link = row.css('a[href*="ServletDownload"]::attr(href)').get()
+        if not pdf_link:
+            pdf_link = row.css('a[href*=".pdf"]::attr(href)').get()
+        
+        if not pdf_link:
+            return None
+            
+        pdf_url = urljoin(response.url, pdf_link)
+        
+        # Extraction adaptative selon le nombre de colonnes
+        year = None
+        court = None
+        title = ''
+        
+        # Patterns courants: Date | Numéro | Instance | Lien
+        for cell in cells:
+            text = cell.css('::text').get('').strip()
+            
+            # Chercher une année
+            if not year:
+                year = self.extract_year_from_text(text)
+            
+            # Chercher une cour/instance
+            if not court and self.looks_like_court(text):
+                court = text
+            
+            # Titre depuis le lien
+            if not title:
+                title = cell.css('a::text').get('').strip()
+        
+        return {
+            'pdf_url': pdf_url,
+            'year': year,
+            'court': court,
+            'canton': self.canton_name,
+            'source_url': response.url,
+            'title': title,
+        }
+    
+    def extract_from_element(self, element, response) -> Optional[Dict]:
+        """Extrait depuis un élément div/article générique"""
+        # Chercher le lien PDF
+        pdf_link = element.css('a[href*="ServletDownload"]::attr(href)').get()
+        if not pdf_link:
+            pdf_link = element.css('a[href*=".pdf"]::attr(href)').get()
+        
+        if not pdf_link:
+            return None
+            
+        pdf_url = urljoin(response.url, pdf_link)
+        
+        # Extraire l'année
+        year = None
+        full_text = ' '.join(element.css('::text').getall())
+        year = self.extract_year_from_text(full_text)
+        
+        # Extraire la cour
+        court = None
+        for selector in ['.court', '.instance', '.juridiction', '.gericht']:
+            court_text = element.css(f'{selector}::text').get()
+            if court_text:
+                court = court_text.strip()
+                break
+        
+        # Titre
+        title = (
+            element.css('h3::text').get() or
+            element.css('.title::text').get() or
+            element.css('a::text').get() or
+            ''
+        ).strip()
+        
+        return {
+            'pdf_url': pdf_url,
+            'year': year,
+            'court': court,
+            'canton': self.canton_name,
+            'source_url': response.url,
+            'title': title,
+        }
+    
+    def extract_year_from_url(self, url: str) -> Optional[int]:
+        """Extrait l'année depuis l'URL"""
+        # Patterns courants dans les URLs
+        patterns = [
+            r'/(\d{4})/',           # /2024/
+            r'year=(\d{4})',        # year=2024
+            r'annee=(\d{4})',       # annee=2024
+            r'jahr=(\d{4})',        # jahr=2024
+            r'_(\d{4})_',           # _2024_
+            r'(\d{4})[/_-]\d{1,2}', # 2024/06 ou 2024-06
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, url)
+            if match:
+                year = int(match.group(1))
+                if 2000 <= year <= datetime.now().year:
+                    return year
+        return None
+    
+    def extract_year_from_text(self, text: str) -> Optional[int]:
+        """Extrait l'année depuis du texte"""
+        if not text:
+            return None
+            
+        # Chercher des dates complètes d'abord
+        date_patterns = [
+            r'\d{1,2}[.\/-]\d{1,2}[.\/-](\d{4})',  # DD.MM.YYYY
+            r'(\d{4})[.\/-]\d{1,2}[.\/-]\d{1,2}',  # YYYY-MM-DD
+        ]
+        
+        for pattern in date_patterns:
+            match = re.search(pattern, text)
+            if match:
+                year = int(match.group(1))
+                if 2000 <= year <= datetime.now().year:
+                    return year
+        
+        # Chercher juste une année
+        year_match = re.search(r'\b(20\d{2})\b', text)
+        if year_match:
+            year = int(year_match.group(1))
+            if 2000 <= year <= datetime.now().year:
+                return year
+                
+        return None
+    
+    def extract_court_from_context(self, element, response) -> Optional[str]:
+        """Essaie d'extraire la cour/instance depuis le contexte"""
+        # Remonter dans l'arbre DOM pour trouver des indices
+        parent = element.xpath('..')
+        if parent:
+            parent_text = ' '.join(parent.css('::text').getall()).lower()
+            
+            # Chercher dans nos mappings
+            for lang_courts in self.COURT_MAPPINGS.values():
+                for pattern, court_name in lang_courts.items():
+                    if pattern in parent_text:
+                        return court_name
+        
+        # Chercher des headers de section
+        preceding_h2 = element.xpath('preceding::h2[1]//text()').get()
+        if preceding_h2 and self.looks_like_court(preceding_h2):
+            return preceding_h2.strip()
+            
+        return None
+    
+    def looks_like_court(self, text: str) -> bool:
+        """Vérifie si le texte ressemble à un nom de cour"""
+        if not text or len(text) < 3:
+            return False
+            
+        text_lower = text.lower()
+        court_keywords = [
+            'cour', 'tribunal', 'gericht', 'corte', 'court',
+            'chambre', 'kammer', 'camera', 'instance',
+            'commission', 'kommission', 'commissione'
+        ]
+        
+        return any(keyword in text_lower for keyword in court_keywords)
+    
+    def should_collect_item(self, item: Dict) -> bool:
+        """Filtre les items selon le mode et les paramètres"""
+        if not item or not item.get('pdf_url'):
+            return False
+        
+        # Filtre par année si spécifié
+        if self.year_filter and item.get('year') != self.year_filter:
+            return False
+        
+        # En mode UPDATE, vérifier la date
+        if self.mode == 'UPDATE' and item.get('year'):
+            # Approximation: si l'année est l'année courante ou précédente
+            current_year = datetime.now().year
+            if item['year'] < current_year - 1:
+                return False
+        
+        return True
+    
+    def follow_pagination(self, response):
+        """Suit les liens de pagination"""
+        # Patterns de pagination courants
+        next_selectors = [
+            'a.next::attr(href)',
+            'a[rel="next"]::attr(href)',
+            'a:contains("Suivant")::attr(href)',
+            'a:contains("Next")::attr(href)',
+            'a:contains("Weiter")::attr(href)',
+            'a:contains("»")::attr(href)',
+            '.pagination a[aria-label*="Next"]::attr(href)',
+        ]
+        
+        for selector in next_selectors:
+            next_url = response.css(selector).get()
+            if next_url:
+                yield Request(urljoin(response.url, next_url), callback=self.parse)
+                break
+        
+        # Pattern numérique de pagination
+        if self.mode == 'INITIAL':
+            # Chercher des liens de pages numériques
+            page_links = response.css('.pagination a::attr(href)').getall()
+            for link in page_links:
+                if re.search(r'page=\d+', link) or re.search(r'/page/\d+', link):
+                    yield Request(urljoin(response.url, link), callback=self.parse)
+    
+    def follow_year_links(self, response):
+        """Suit les liens d'années en mode INITIAL"""
+        # Chercher des liens qui ressemblent à des années
+        year_links = []
+        current_year = datetime.now().year
+        
+        for link in response.css('a'):
+            href = link.css('::attr(href)').get('')
+            text = link.css('::text').get('')
+            
+            # Vérifier si le lien ou le texte contient une année
+            for year in range(2000, current_year + 1):
+                if str(year) in href or str(year) == text.strip():
+                    full_url = urljoin(response.url, href)
+                    if full_url not in year_links:
+                        year_links.append(full_url)
+                        yield Request(full_url, callback=self.parse)
+    
+    def parse_export(self, response):
+        """Parse un fichier d'export si trouvé"""
+        content_type = response.headers.get('Content-Type', b'').decode()
+        
+        if 'csv' in content_type or response.url.endswith('.csv'):
+            self.logger.info(f"Export CSV trouvé: {response.url}")
+            # TODO: Parser CSV selon le format
+            # Pour l'instant, on retourne au parsing HTML
+            pass
+        elif 'excel' in content_type or 'spreadsheet' in content_type:
+            self.logger.info(f"Export Excel trouvé: {response.url}")
+            # TODO: Parser Excel selon le format
+            pass
+
+# ===============================================
+# fribourg_spider.py - Implementation pour Fribourg
+from tribuna_base import TribunaBaseSpider
+
+class FribourgSpider(TribunaBaseSpider):
+    """
+    Spider pour publicationtc.fr.ch
+    ~13563 décisions publiées
+    """
+    
+    name = 'tribuna_fribourg'
+    canton_name = 'Fribourg'
+    
+    start_urls = [
+        'https://publicationtc.fr.ch/',
+        'https://publicationtc.fr.ch/?locale=fr',
+        'https://publicationtc.fr.ch/?locale=de',
+    ]
+    
+    custom_settings = {
+        **TribunaBaseSpider.custom_settings,
+        'DOWNLOAD_DELAY': 1.0,  # Conservative pour Fribourg
+    }
+
+# ===============================================
+# grisons_spider.py - Implementation pour les Grisons
+class GrisonsSpider(TribunaBaseSpider):
+    """
+    Spider pour les Grisons
+    ~14043 décisions publiées
+    Multilingue: DE/IT/RM
+    """
+    
+    name = 'tribuna_grisons'
+    canton_name = 'Grisons'
+    
+    # TODO: Ajouter les URLs exactes des Grisons
+    start_urls = [
+        # URLs à confirmer
+    ]
+
+# ===============================================
+# items.py - Modèle de données minimal
+import scrapy
+
+class TribunaDecisionItem(scrapy.Item):
+    """Item minimal pour décisions Tribuna"""
+    
+    # Champs essentiels
+    pdf_url = scrapy.Field()      # URL complète du PDF
+    year = scrapy.Field()          # Année de publication (int)
+    
+    # Champs optionnels mais utiles
+    court = scrapy.Field()         # Instance/Cour
+    canton = scrapy.Field()        # Canton source
+    title = scrapy.Field()         # Titre si disponible
+    
+    # Metadata système
+    source_url = scrapy.Field()   # URL de la page source
+    docket_number = scrapy.Field() # Numéro de dossier si extractible
+    
+    # Pour compatibilité avec tes pipelines existantes
+    file_urls = scrapy.Field()     # Pour FilesPipeline
+    files = scrapy.Field()         # Résultat FilesPipeline
+
+# ===============================================
+# run_tribuna.py - Script de lancement
+"""
+Script pour lancer les spiders Tribuna avec les bons paramètres
+"""
+import sys
+import subprocess
+from datetime import datetime
+
+def run_spider(spider_name, mode='UPDATE', days_back=7, year_filter=None):
+    """Lance un spider Tribuna avec les paramètres appropriés"""
+    
+    cmd = [
+        'scrapy', 'crawl', spider_name,
+        '-a', f'mode={mode}',
+        '-a', f'days_back={days_back}',
+    ]
+    
+    if year_filter:
+        cmd.extend(['-a', f'year_filter={year_filter}'])
+    
+    # Output file
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    output_file = f'output/{spider_name}_{mode.lower()}_{timestamp}.jsonl'
+    cmd.extend(['-o', output_file])
+    
+    print(f"Lancement: {' '.join(cmd)}")
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    
+    if result.returncode == 0:
+        print(f"✅ Succès: {output_file}")
+    else:
+        print(f"❌ Erreur: {result.stderr}")
+    
+    return result.returncode
+
+if __name__ == '__main__':
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Lance les spiders Tribuna')
+    parser.add_argument('spider', help='Nom du spider (ex: tribuna_fribourg)')
+    parser.add_argument('--mode', default='UPDATE', choices=['INITIAL', 'UPDATE'],
+                       help='Mode d\'exécution')
+    parser.add_argument('--days', type=int, default=7,
+                       help='Nombre de jours à récupérer en mode UPDATE')
+    parser.add_argument('--year', type=int,
+                       help='Filtrer une année spécifique')
+    
+    args = parser.parse_args()
+    
+    sys.exit(run_spider(
+        args.spider,
+        mode=args.mode,
+        days_back=args.days,
+        year_filter=args.year
+    ))
+
+# ===============================================
+# settings_addon.py - Settings à ajouter à ton settings.py existant
+"""
+Configuration spécifique pour les spiders Tribuna
+À merger avec ton settings.py existant
+"""
+
+# Pour les spiders Tribuna spécifiquement
+TRIBUNA_SETTINGS = {
+    'DOWNLOAD_DELAY': 1.0,
+    'CONCURRENT_REQUESTS': 1,
+    'CONCURRENT_REQUESTS_PER_DOMAIN': 1,
+    
+    # Compatible avec tes pipelines existantes
+    'ITEM_PIPELINES': {
+        # Tes pipelines existantes...
+        'scrapy.pipelines.files.FilesPipeline': 300,
+    },
+    
+    # Pour le téléchargement des PDFs
+    'FILES_STORE': 'downloads/tribuna',
+    'FILES_URLS_FIELD': 'file_urls',
+    'FILES_RESULT_FIELD': 'files',
+    
+    # Gestion des erreurs
+    'RETRY_TIMES': 3,
+    'RETRY_HTTP_CODES': [500, 502, 503, 504, 408, 429],
+    
+    # User agent standard
+    'USER_AGENT': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',

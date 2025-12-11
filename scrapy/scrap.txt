@@ -1,0 +1,25 @@
+tribuna_scraper/
+├── pyproject.toml
+├── README.md
+├── requirements.txt
+├── scrapy.cfg
+├── tribuna_scraper/
+│   ├── __init__.py
+│   ├── items.py
+│   ├── middlewares.py
+│   ├── pipelines.py
+│   ├── settings.py
+│   ├── spiders/
+│   │   ├── __init__.py
+│   │   ├── base_tribuna.py
+│   │   └── fribourg.py
+│   └── utils/
+│       ├── __init__.py
+│       ├── parsers.py
+│       └── normalizers.py
+└── tests/
+    ├── __init__.py
+    ├── fixtures/
+    │   ├── fribourg_list.html
+    │   └── fribourg_detail.html
+    └── test_fribourg_parser.py
