@@ -1,0 +1,23 @@
+# Tribuna Scraper Dependencies
+# Python 3.12+ required
+
+# Core scraping framework - MINIMUM 2.13, NO Playwright
+scrapy>=2.13,<3.0
+
+# HTML/XML parsing
+lxml>=6.0
+parsel>=1.10
+
+# Testing
+pytest>=9.0
+pytest-asyncio>=0.24
+
+# HTTP/Networking (already included in Scrapy dependencies)
+# cryptography - for HTTPS support
+# twisted - async framework used by Scrapy
+
+# Data validation
+# Scrapy includes itemadapter, itemloaders
+
+# Note: NO Playwright or browser automation dependencies
+# This scraper works with GWT-RPC API calls only

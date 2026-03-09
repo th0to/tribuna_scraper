@@ -1,0 +1,11 @@
+# Python cache
+__pycache__/
+**/__pycache__/
+*.py[cod]
+
+# Test/cache artifacts
+.pytest_cache/
+.coverage
+
+# Generated outputs
+output/

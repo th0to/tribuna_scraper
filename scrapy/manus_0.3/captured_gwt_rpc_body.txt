@@ -1,1 +1,0 @@
-7|0|6|https://publicationtc.fr.ch/tribunavtplus/|CAC80118FB77794F1FDFC1B51371CC63|tribunavtplus.client.zugriff.LoadTableService|getBerechtigungen|java.lang.String/2004016611||1|2|3|4|2|5|5|6|6|
